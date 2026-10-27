@@ -1,0 +1,28 @@
+# Dependencies / build output (stack-neutral until the runtime lands)
+node_modules/
+dist/
+build/
+out/
+target/
+*.pyc/
+__pycache__/
+.venv/
+venv/
+
+# Runtime artifacts
+*.log
+sessions/
+# (the workspace folder lives beside the executable, not in this repo)
+
+# IDE
+.idea/
+*.iml
+.ipr
+.iws
+.vscode/
+
+# OS / secrets
+.DS_Store
+.env
+.env.*
+*.local
