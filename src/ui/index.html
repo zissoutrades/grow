@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Grow — занятие</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">Grow</div>
+      <div id="session-meta" class="session-meta" hidden>
+        <span id="clock" class="clock">00:00</span>
+        <span id="beat" class="beat">этап: —</span>
+      </div>
+    </header>
+
+    <div id="status" class="status" role="status" aria-live="polite">Готово.</div>
+
+    <main class="main">
+      <section id="screen-landing" class="screen landing">
+        <h1>Занятие с тьютором</h1>
+        <p class="lede">
+          Укажите папку занятия. Тьютор прочитает конфиг, память и план урока из
+          этих файлов.
+        </p>
+        <label class="field-label" for="workspace-path">Папка занятия</label>
+        <input
+          id="workspace-path"
+          class="path-input"
+          type="text"
+          spellcheck="false"
+          autocomplete="off"
+          placeholder="/home/…/grow/workspace"
+        />
+        <button id="start-button" class="start-button" type="button">Начать занятие</button>
+        <p class="hint">
+          Микрофон включится сразу. Всё остальное — голосом и нажатиями на холсте.
+        </p>
+      </section>
+
+      <section id="screen-session" class="screen session" hidden>
+        <div class="session-head">
+          <button id="close-button" class="close-button" type="button">Завершить занятие</button>
+        </div>
+
+        <div class="session-body">
+          <div id="canvas" class="canvas" aria-live="polite">
+            <p id="canvas-empty" class="canvas-empty">холст пуст</p>
+
+            <section id="widget-tenframe" class="widget tenframe-widget" hidden>
+              <h2>Рамка из десяти</h2>
+              <div id="tenframe-grid" class="tenframe-grid"></div>
+              <p id="tenframe-caption" class="widget-caption"></p>
+            </section>
+
+            <section id="widget-numberline" class="widget numberline-widget" hidden>
+              <h2>Числовая прямая</h2>
+              <div id="numberline" class="numberline"></div>
+            </section>
+
+            <section id="widget-choices" class="widget choice-widget" hidden>
+              <h2>Выбери ответ</h2>
+              <div id="choices-grid" class="choices-grid"></div>
+            </section>
+
+            <div id="text-blocks" class="text-blocks"></div>
+          </div>
+
+          <aside class="transcript-panel">
+            <h2>Разговор</h2>
+            <div id="transcript" class="transcript"></div>
+          </aside>
+        </div>
+      </section>
+
+      <section id="screen-closed" class="screen closed" hidden>
+        <h1>сессия сохранена</h1>
+        <p id="after-status" class="after-status">после сессии: —</p>
+        <button id="new-session-button" class="start-button" type="button" disabled>
+          Новое занятие
+        </button>
+        <button id="exit-button" class="link-button" type="button">выйти</button>
+      </section>
+    </main>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

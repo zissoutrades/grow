@@ -1,0 +1,451 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Grow — консоль родителя</title>
+    <link rel="stylesheet" href="/console/style.css" />
+    <style>
+      .console-toolbar {
+        display: flex;
+        align-items: flex-end;
+        gap: 12px;
+        flex-wrap: wrap;
+        margin-bottom: 18px;
+        padding: 16px 18px;
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 14px;
+      }
+
+      .console-toolbar .field-label {
+        margin-bottom: 6px;
+      }
+
+      .console-toolbar .path-input {
+        flex: 1 1 360px;
+        padding: 10px 14px;
+        font-size: 15px;
+      }
+
+      .console-toolbar .small-button {
+        flex: 0 0 auto;
+      }
+
+      .console-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr) minmax(0, 0.9fr);
+        gap: 18px;
+        align-items: start;
+      }
+
+      .console-panel {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 18px;
+        padding: 20px;
+        min-width: 0;
+      }
+
+      .console-panel h2 {
+        margin: 0 0 14px;
+        font-size: 13px;
+        font-weight: 650;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+
+      .console-chat {
+        display: flex;
+        flex-direction: column;
+        min-height: 560px;
+      }
+
+      .chat-log {
+        flex: 1 1 auto;
+        height: calc(100vh - 330px);
+        min-height: 300px;
+        overflow-y: auto;
+        padding-right: 6px;
+        margin-bottom: 14px;
+      }
+
+      .chat-message {
+        margin: 0 0 14px;
+        padding: 12px 14px;
+        border-radius: 12px;
+        border: 1px solid var(--border);
+        background: var(--panel-2);
+        font-size: 15px;
+        line-height: 1.55;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+
+      .chat-message.user {
+        background: #14263d;
+        border-color: #2d4a6e;
+      }
+
+      .chat-message.manager {
+        background: #101822;
+      }
+
+      .chat-label {
+        display: block;
+        margin-bottom: 4px;
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+
+      .chat-message.user .chat-label {
+        color: #7fb0ff;
+      }
+
+      .chat-message.manager .chat-label {
+        color: #66d99a;
+      }
+
+      .chat-actions {
+        display: block;
+        margin-top: 8px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      .chat-empty {
+        margin: 0;
+        color: #6f8095;
+        font-size: 15px;
+      }
+
+      .chat-form {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+
+      .chat-input,
+      .config-editor {
+        width: 100%;
+        padding: 12px 14px;
+        border-radius: 10px;
+        border: 1px solid var(--border);
+        background: #101822;
+        color: var(--text);
+        font: inherit;
+        font-size: 15px;
+        line-height: 1.5;
+        resize: vertical;
+      }
+
+      .chat-input:focus,
+      .config-editor:focus {
+        outline: 2px solid var(--accent);
+        outline-offset: 1px;
+      }
+
+      .chat-send {
+        margin-top: 0;
+        padding: 12px 18px;
+        font-size: 16px;
+      }
+
+      .tab-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-bottom: 12px;
+      }
+
+      .tab,
+      .small-button {
+        padding: 8px 12px;
+        border: 1px solid var(--border);
+        border-radius: 9px;
+        background: var(--panel-2);
+        color: var(--text);
+        font: inherit;
+        font-size: 13px;
+        cursor: pointer;
+      }
+
+      .tab.active,
+      .small-button.primary {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: var(--accent-ink);
+        font-weight: 700;
+      }
+
+      .small-button:disabled {
+        opacity: 0.45;
+        cursor: default;
+      }
+
+      .config-editor {
+        height: calc(100vh - 500px);
+        min-height: 220px;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 13px;
+        tab-size: 2;
+      }
+
+      .config-editor[readonly] {
+        color: var(--muted);
+      }
+
+      .config-actions {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-top: 10px;
+      }
+
+      .hint-inline {
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      .subhead {
+        margin: 20px 0 10px;
+        font-size: 12px;
+        font-weight: 650;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+
+      .preset-list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .preset-empty {
+        margin: 0;
+        font-size: 13px;
+        color: var(--muted);
+      }
+
+      .console-side {
+        position: sticky;
+        top: 16px;
+      }
+
+      .diff-view,
+      .md-view {
+        height: calc(100vh - 300px);
+        min-height: 300px;
+        overflow: auto;
+        border-radius: 10px;
+        background: #0c141e;
+        border: 1px solid var(--border);
+        padding: 14px;
+      }
+
+      .diff-view pre {
+        margin: 0;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 12px;
+        line-height: 1.55;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+
+      .diff-line.add {
+        color: #7ee2a8;
+      }
+
+      .diff-line.del {
+        color: #ff9b9b;
+      }
+
+      .diff-line.hunk {
+        color: var(--accent);
+      }
+
+      .diff-line.meta {
+        color: var(--muted);
+      }
+
+      .side-empty {
+        margin: 0;
+        color: #6f8095;
+        font-size: 14px;
+      }
+
+      .md-view {
+        font-size: 14px;
+        line-height: 1.6;
+      }
+
+      .md-view h1,
+      .md-view h2,
+      .md-view h3,
+      .md-view h4 {
+        margin: 14px 0 8px;
+        line-height: 1.25;
+      }
+
+      .md-view h1 {
+        font-size: 20px;
+      }
+
+      .md-view h2 {
+        font-size: 17px;
+      }
+
+      .md-view h3,
+      .md-view h4 {
+        font-size: 15px;
+      }
+
+      .md-view p {
+        margin: 0 0 10px;
+      }
+
+      .md-view ul {
+        margin: 0 0 10px;
+        padding-left: 20px;
+      }
+
+      .md-view code {
+        padding: 1px 5px;
+        border-radius: 5px;
+        background: var(--panel-2);
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 12px;
+      }
+
+      .console-close {
+        padding: 10px 18px;
+        font-size: 14px;
+      }
+
+      .console-head-actions {
+        display: flex;
+        gap: 10px;
+      }
+
+      @media (max-width: 1100px) {
+        .console-grid {
+          grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        }
+
+        .console-side {
+          grid-column: 1 / -1;
+          position: static;
+        }
+
+        .diff-view,
+        .md-view {
+          height: 40vh;
+          min-height: 220px;
+        }
+      }
+
+      @media (max-width: 760px) {
+        .console-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .console-chat {
+          min-height: 0;
+        }
+
+        .chat-log {
+          height: 38vh;
+          min-height: 220px;
+        }
+
+        .config-editor {
+          height: 34vh;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">Grow · консоль родителя</div>
+      <div class="console-head-actions">
+        <button id="close-session-button" class="close-button console-close" type="button" hidden>
+          Завершить занятие
+        </button>
+      </div>
+    </header>
+
+    <div id="status" class="status" role="status" aria-live="polite">Загрузка…</div>
+
+    <main class="main">
+      <section class="console-toolbar" aria-label="Папка занятия">
+        <div style="flex: 1 1 360px">
+          <label class="field-label" for="workspace-input">Папка занятия</label>
+          <input
+            id="workspace-input"
+            class="path-input"
+            type="text"
+            spellcheck="false"
+            autocomplete="off"
+            placeholder="/home/…/grow/workspace"
+          />
+        </div>
+        <button id="workspace-open" class="small-button primary" type="button">Открыть</button>
+      </section>
+
+      <div class="console-grid">
+        <section class="console-panel console-chat" aria-label="Чат с менеджером">
+          <h2>Чат с менеджером</h2>
+          <div id="chat-log" class="chat-log" aria-live="polite">
+            <p class="chat-empty">Спросите, что изменить в занятии…</p>
+          </div>
+          <form id="chat-form" class="chat-form">
+            <textarea
+              id="chat-input"
+              class="chat-input"
+              rows="3"
+              placeholder="Например: сделай тьютора мягче и короче"
+            ></textarea>
+            <button id="chat-send" class="start-button chat-send" type="submit">Отправить</button>
+          </form>
+        </section>
+
+        <section class="console-panel console-config" aria-label="Конфигурация">
+          <h2>Конфигурация</h2>
+          <div id="config-tabs" class="tab-row" role="tablist">
+            <button class="tab active" type="button" data-file="tutor">тьютор</button>
+            <button class="tab" type="button" data-file="curriculum">программа</button>
+            <button class="tab" type="button" data-file="permissions">права</button>
+          </div>
+          <textarea id="config-editor" class="config-editor" spellcheck="false"></textarea>
+          <div class="config-actions">
+            <button id="config-save" class="small-button primary" type="button">Сохранить</button>
+            <span id="config-hint" class="hint-inline"></span>
+          </div>
+          <h3 class="subhead">Пресеты</h3>
+          <div id="preset-list" class="preset-list"></div>
+        </section>
+
+        <aside class="console-panel console-side" aria-label="Панель">
+          <h2>Панель</h2>
+          <div id="side-tabs" class="tab-row" role="tablist">
+            <button class="tab active" type="button" data-view="diff">разница</button>
+            <button class="tab" type="button" data-view="diary">дневник</button>
+            <button class="tab" type="button" data-view="report">отчёт</button>
+            <button class="tab" type="button" data-view="lesson">план</button>
+          </div>
+          <div id="side-diff" class="diff-view">
+            <p class="side-empty">Изменений пока нет.</p>
+          </div>
+          <div id="side-md" class="md-view" hidden></div>
+        </aside>
+      </div>
+    </main>
+
+    <script type="module" src="/console/console.js"></script>
+  </body>
+</html>
