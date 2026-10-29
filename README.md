@@ -18,7 +18,7 @@ Requires [Bun](https://bun.sh). No dependencies, no database, no server beyond t
 - `src/proxy/` — the single Bun process: Gemini Live relay, session package builder, tool calls, JSONL session log, WAV recording, timers, billing accounting, after-loop, parent console
 - `src/ui/` — the browser client (child session at `/`, parent console at `/console`); static ES modules, no build step
 - `scripts/` — probes, mock proxy, `compile.sh` (single self-contained executable)
-- `test/` — bun tests (122 passing)
+- `test/` — bun tests (147 passing)
 - `docs/agent/` — coding conventions, protocol contract, status
 
 ## Workspace format
