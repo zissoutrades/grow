@@ -29,7 +29,7 @@ export interface AfterContext {
   readonly sessionId: string;
   readonly sessionFolder: string;
   readonly workspacePath: string;
-  readonly reason: "child_tap" | "parent_console" | "timeout" | "silence";
+  readonly reason: "child_tap" | "parent_console" | "timeout" | "silence" | "child_unresponsive";
   /** Injectable text model for tests; defaults to the shared §9 route. */
   readonly generateText?: TextModelFn;
   /** Injectable clock, used when the session stamp lacks a date/time and for the no-plan rule. */

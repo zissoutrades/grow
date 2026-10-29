@@ -25,7 +25,8 @@ export type FinalizeReason =
   | "parent_console"
   | "timeout"
   | "silence"
-  | "no_child_response";
+  | "no_child_response"
+  | "child_unresponsive";
 
 export type SessionState = "created" | "starting" | "live" | "finalizing" | "done" | "error";
 
@@ -41,6 +42,10 @@ export interface SessionDurations {
   closeInstructionMs: number;
   hardCapMs: number;
   silenceMs: number;
+  /** Mid-session: no child input while the tutor is idle before one nudge. */
+  midSessionNudgeMs: number;
+  /** Mid-session: further silence after the nudge before the graceful close. */
+  midSessionCloseMs: number;
   /** Wait after the greeting before the first "can you hear me?" retry. */
   greetingGraceMs: number;
   /** Wait between greeting retries and before the farewell. */
@@ -53,19 +58,35 @@ export const DEFAULT_DURATIONS: SessionDurations = {
   closeInstructionMs: 10 * 60 * 1000,
   hardCapMs: 12 * 60 * 1000,
   silenceMs: 3 * 60 * 1000,
-  greetingGraceMs: 5_000,
-  greetingRetryMs: 10_000,
-  farewellGraceMs: 5_000,
+  midSessionNudgeMs: 3 * 60 * 1000,
+  midSessionCloseMs: 2 * 60 * 1000,
+  greetingGraceMs: 8_000,
+  greetingRetryMs: 12_000,
+  farewellGraceMs: 3_000,
 };
+
+/**
+ * If the client's playback-idle message is missed, assume the tutor's audio
+ * ended this long after `turn_complete`. The client sends the real timestamp;
+ * this only keeps the ladder moving after a reconnect or a dropped frame.
+ */
+export const PLAYBACK_IDLE_FALLBACK_MS = 2_000;
+
+/** The farewell gets a longer fallback: the close must never cut audible speech. */
+export const FAREWELL_IDLE_FALLBACK_MS = 3_000;
+
+/** How often a due retry/finalize re-checks while the tutor is still speaking. */
+const TUTOR_BUSY_RECHECK_MS = 500;
 
 export const CLOSE_INSTRUCTION = "Приблизься к финальному биту: рефлексия и прощание.";
 
 /**
- * Start failsafe (owner spec U10.1). The tutor greets first; if the child never
- * answers, two retries lead to a graceful `no_child_response` close.
+ * Start failsafe (owner spec U10.1, refined by U13.1). The tutor greets first,
+ * but says only hello and waits: the first beat starts only after the child
+ * answers (the model's own flow), never immediately after the greeting.
  */
 export const GREETING_INSTRUCTION =
-  "Начни занятие сам, не жди, пока ребёнок заговорит: коротко поздоровайся по-русски и сразу переходи к первому биту урока.";
+  "Поздоровайся коротко по-русски и дождись ответа ребёнка; первый бит начинай только после того, как ребёнок ответит.";
 
 export const GREETING_RETRY_INSTRUCTIONS = [
   "Ребёнок пока не ответил. Коротко спроси по-русски: «Ты меня слышишь?»",
@@ -74,6 +95,14 @@ export const GREETING_RETRY_INSTRUCTIONS = [
 
 export const NO_RESPONSE_FAREWELL =
   "Скажи ребёнку по-русски: «Кажется, ты меня не слышишь. Завершаю занятие — перезапусти, когда будешь готов(а).»";
+
+/**
+ * Mid-session silence nudge (U14.1). One nudge per silence episode: if the
+ * child still does not answer, the session closes gracefully with
+ * `child_unresponsive` instead of repeating the prompt.
+ */
+export const CHILD_UNRESPONSIVE_NUDGE =
+  "Ребёнок давно молчит. Коротко спроси по-русски: «Ты здесь? Если тебя нет — я завершу занятие.»";
 
 const GREETING_MAX_RETRIES = GREETING_RETRY_INSTRUCTIONS.length;
 
@@ -100,6 +129,7 @@ export const systemClock: Clock = {
 export interface TimerHandlers {
   onCloseInstruction(): void;
   onHardCap(): void;
+  /** The end-phase idle timer expired: finalize `silence`. */
   onSilence(): void;
   /** 1-based greeting retry: 1 = first "Ты меня слышишь?", 2 = the second. */
   onGreetingRetry(attempt: number): void;
@@ -107,12 +137,45 @@ export interface TimerHandlers {
   onNoChildResponse(): void;
   /** The farewell has had its grace period: finalize `no_child_response`. */
   onNoChildResponseFinalize(): void;
+  /** Mid-session silence: inject the single "are you there?" nudge. */
+  onChildUnresponsiveNudge(): void;
+  /** Silence persisted after the nudge: finalize `child_unresponsive`. */
+  onChildUnresponsiveFinalize(): void;
+  /** True when no tutor turn is in flight; timers never fire mid-turn. */
+  isTutorIdle(): boolean;
 }
 
+/** Which tutor turn the ladder is waiting to finish before its next phase. */
+type GreetingSettleStage = "greeting" | "retry" | "farewell";
+
+/** The timer phase that starts once that turn has settled. */
+type GreetingPhase = "grace" | "retry-gap" | "farewell-grace";
+
+/** The stage of the single child-silence watchdog. */
+type SilenceStage = "nudge" | "close" | "finalize";
+
 /**
- * Session clock: 10:00 close instruction, 12:00 hard cap, an idle timer
- * (3 min with no model/child activity) armed after the close instruction, and
- * the start failsafe ladder armed after the tutor's opening greeting.
+ * `mid` counts child silence during the session (one nudge, then a graceful
+ * `child_unresponsive` close). `end` is the 10:00 close-instruction phase: it
+ * only finalizes (`silence`) and never nudges.
+ */
+type SilenceMode = "mid" | "end";
+
+/**
+ * Session clock: 10:00 close instruction, 12:00 hard cap, the start-failsafe
+ * ladder armed once the tutor's greeting has finished (turn complete +
+ * playback idle), and one child-silence watchdog.
+ *
+ * The silence watchdog has two modes so the mid-session and end-phase timers
+ * can never fight:
+ * - **mid** (session live): no child transcript/canvas action while the tutor
+ *   is idle → one nudge at `midSessionNudgeMs`; no child input for another
+ *   `midSessionCloseMs` → finalize `child_unresponsive`. A child input starts a
+ *   fresh episode; every tutor turn pauses the countdown (silence during tutor
+ *   speech is natural) and it resumes only once that turn has completed and
+ *   its playback drained.
+ * - **end** (after the 10:00 close instruction): any activity restarts the
+ *   `silenceMs` idle timer; expiry finalizes `silence`.
  */
 export class SessionTimers {
   private readonly clock: Clock;
@@ -120,12 +183,26 @@ export class SessionTimers {
   private readonly handlers: TimerHandlers;
   private closeInstructionHandle: unknown = null;
   private hardCapHandle: unknown = null;
-  private silenceHandle: unknown = null;
-  private greetingHandle: unknown = null;
+  private phaseHandle: unknown = null;
+  private phase: GreetingPhase | null = null;
+  private settleStage: GreetingSettleStage | null = null;
+  private settleTurnComplete = false;
+  private settlePlaybackIdle = false;
+  private settleFallbackHandle: unknown = null;
   private greetingArmed = false;
   private greetingAttempt = 0;
   private farewellIssued = false;
-  private instructionSent = false;
+
+  private silenceMode: SilenceMode | null = null;
+  private silenceStage: SilenceStage = "nudge";
+  private silenceTimerHandle: unknown = null;
+  private silenceDeadline = 0;
+  private silenceRemainingMs = 0;
+  private silenceWaiting = false;
+  private silenceTurnComplete = false;
+  private silencePlaybackIdle = false;
+  private silenceFallbackHandle: unknown = null;
+
   private disposed = false;
 
   constructor(clock: Clock, durations: SessionDurations, handlers: TimerHandlers) {
@@ -145,25 +222,31 @@ export class SessionTimers {
 
     this.closeInstructionHandle = this.clock.setTimeout(() => {
       this.closeInstructionHandle = null;
-      this.instructionSent = true;
+      this.switchToEndPhase();
       this.handlers.onCloseInstruction();
-      this.armSilence();
     }, this.durations.closeInstructionMs);
   }
 
-  /** Called on meaningful model/child activity; restarts the idle timer. */
+  /** Called on meaningful model/child activity; restarts the end-phase timer. */
   notifyActivity(): void {
-    if (this.disposed || !this.instructionSent) {
+    if (this.disposed || this.silenceMode !== "end") {
       return;
     }
-    this.clearSilence();
-    this.armSilence();
+    if (this.silenceWaiting) {
+      // A tutor turn is in flight (or its audio is still draining): the settle
+      // hook starts the idle timer. Activity still means "restart the full
+      // idle window", never resume the pre-turn remainder.
+      this.silenceRemainingMs = this.durations.silenceMs;
+      return;
+    }
+    this.restartSilenceStage(this.durations.silenceMs);
   }
 
   /**
-   * Arm the start failsafe after the tutor's greeting: 5 s of child silence →
-   * "Ты меня слышишь?", 10 s more → one more retry, 10 s more → farewell, and
-   * after the farewell grace period the session finalizes.
+   * Begin the start failsafe after the greeting was injected. Nothing is
+   * scheduled here: the first grace starts only once the greeting turn has
+   * completed (see `noteTutorTurnComplete`) and its audio has stopped playing
+   * (see `noteTutorPlaybackIdle`), so a retry can never interrupt the tutor.
    */
   armGreetingWatchdog(): void {
     if (this.disposed || this.greetingArmed || this.farewellIssued) {
@@ -171,7 +254,89 @@ export class SessionTimers {
     }
     this.greetingArmed = true;
     this.greetingAttempt = 0;
-    this.scheduleGreeting(this.durations.greetingGraceMs);
+    this.awaitTutorSettle("greeting");
+  }
+
+  /**
+   * Begin the mid-session child-silence watchdog. It starts counting only once
+   * the current tutor turn has settled, so a long greeting/first turn is never
+   * mistaken for the child's absence.
+   */
+  armChildSilenceWatchdog(): void {
+    if (this.disposed || this.silenceMode !== null) {
+      return;
+    }
+    this.silenceMode = "mid";
+    this.silenceStage = "nudge";
+    this.silenceRemainingMs = this.durations.midSessionNudgeMs;
+    this.restartSilenceStage(this.silenceRemainingMs);
+  }
+
+  /**
+   * Any child transcript (partial or final) or canvas action. Mid-session it
+   * ends the current silence episode (a new one may nudge once more); in the
+   * end phase it restarts the idle timer.
+   */
+  noteChildInput(): void {
+    if (this.disposed || this.silenceMode === null) {
+      return;
+    }
+    if (this.silenceMode === "end") {
+      this.restartSilenceStage(this.durations.silenceMs);
+      return;
+    }
+    this.silenceStage = "nudge";
+    this.silenceRemainingMs = this.durations.midSessionNudgeMs;
+    this.restartSilenceStage(this.silenceRemainingMs);
+  }
+
+  /**
+   * A tutor turn is starting. Silence during tutor speech is natural, so the
+   * mid-session countdown pauses and resumes when that turn has settled. In the
+   * end phase any activity restarts the idle timer instead.
+   */
+  noteTutorActivity(): void {
+    if (this.disposed || this.silenceMode === null) {
+      return;
+    }
+    if (this.silenceMode === "end") {
+      this.restartSilenceStage(this.durations.silenceMs);
+      return;
+    }
+    if (this.silenceWaiting) {
+      return;
+    }
+    const remaining =
+      this.silenceTimerHandle === null
+        ? this.silenceRemainingMs
+        : Math.max(0, this.silenceDeadline - this.clock.now());
+    this.beginSilenceWait(remaining);
+  }
+
+  /** The tutor turn was interrupted; its client playback is flushed. */
+  noteTutorInterrupted(): void {
+    if (this.disposed || !this.silenceWaiting) {
+      return;
+    }
+    this.settleSilenceWatchdog();
+  }
+
+  /** The tutor's current turn ended upstream (`turn_complete`). */
+  noteTutorTurnComplete(): void {
+    if (this.disposed) {
+      return;
+    }
+    this.handleGreetingTurnComplete();
+    this.handleSilenceTurnComplete();
+  }
+
+  /** The client reported that the tutor's audio queue actually drained. */
+  noteTutorPlaybackIdle(): void {
+    if (this.disposed) {
+      return;
+    }
+    this.handleGreetingPlaybackIdle();
+    this.handleSilencePlaybackIdle();
   }
 
   /** First child response: stop the ladder. A farewell already spoken is final. */
@@ -180,7 +345,10 @@ export class SessionTimers {
       return;
     }
     this.greetingArmed = false;
-    this.clearGreeting();
+    this.phase = null;
+    this.settleStage = null;
+    this.clearSettleFallback();
+    this.clearPhase();
   }
 
   dispose(): void {
@@ -196,66 +364,284 @@ export class SessionTimers {
       this.clock.clearTimeout(this.closeInstructionHandle);
       this.closeInstructionHandle = null;
     }
-    this.clearSilence();
-    this.clearGreeting();
+    this.clearSilenceTimer();
+    this.clearSilenceFallback();
+    this.clearPhase();
+    this.clearSettleFallback();
+    this.phase = null;
+    this.settleStage = null;
     this.greetingArmed = false;
+    this.silenceMode = null;
+    this.silenceWaiting = false;
+    this.silenceRemainingMs = 0;
   }
 
-  private scheduleGreeting(delayMs: number): void {
-    this.clearGreeting();
-    this.greetingHandle = this.clock.setTimeout(() => {
-      this.greetingHandle = null;
-      this.onGreetingTimer();
+  private awaitTutorSettle(stage: GreetingSettleStage): void {
+    this.clearPhase();
+    this.clearSettleFallback();
+    this.phase = null;
+    this.settleStage = stage;
+    this.settleTurnComplete = false;
+    this.settlePlaybackIdle = false;
+  }
+
+  private handleGreetingTurnComplete(): void {
+    if (this.settleStage === null || this.settleTurnComplete) {
+      return;
+    }
+    this.settleTurnComplete = true;
+    if (this.settlePlaybackIdle) {
+      this.armSettledPhase();
+      return;
+    }
+    // The client's playback-idle message may be lost (reconnect, dropped
+    // frame). Fall back to a fixed delay after turn_complete.
+    const fallbackMs =
+      this.settleStage === "farewell" ? FAREWELL_IDLE_FALLBACK_MS : PLAYBACK_IDLE_FALLBACK_MS;
+    this.settleFallbackHandle = this.clock.setTimeout(() => {
+      this.settleFallbackHandle = null;
+      if (this.settleStage === null) {
+        return;
+      }
+      this.settlePlaybackIdle = true;
+      this.armSettledPhase();
+    }, fallbackMs);
+  }
+
+  private handleGreetingPlaybackIdle(): void {
+    if (this.settleStage === null || this.settlePlaybackIdle) {
+      return;
+    }
+    this.settlePlaybackIdle = true;
+    this.clearSettleFallback();
+    if (this.settleTurnComplete) {
+      this.armSettledPhase();
+    }
+  }
+
+  private handleSilenceTurnComplete(): void {
+    if (!this.silenceWaiting || this.silenceTurnComplete) {
+      return;
+    }
+    this.silenceTurnComplete = true;
+    if (this.silencePlaybackIdle) {
+      this.settleSilenceWatchdog();
+      return;
+    }
+    this.silenceFallbackHandle = this.clock.setTimeout(() => {
+      this.silenceFallbackHandle = null;
+      if (!this.silenceWaiting) {
+        return;
+      }
+      this.silencePlaybackIdle = true;
+      this.settleSilenceWatchdog();
+    }, PLAYBACK_IDLE_FALLBACK_MS);
+  }
+
+  private handleSilencePlaybackIdle(): void {
+    if (!this.silenceWaiting || this.silencePlaybackIdle) {
+      return;
+    }
+    this.silencePlaybackIdle = true;
+    this.clearSilenceFallback();
+    if (this.silenceTurnComplete) {
+      this.settleSilenceWatchdog();
+    }
+  }
+
+  /** Turn complete and playback idle are both known: start the phase timer. */
+  private armSettledPhase(): void {
+    const stage = this.settleStage;
+    if (stage === null || !this.settleTurnComplete || !this.settlePlaybackIdle) {
+      return;
+    }
+    this.settleStage = null;
+    this.clearSettleFallback();
+    if (stage === "farewell") {
+      this.phase = "farewell-grace";
+      this.schedulePhase(this.durations.farewellGraceMs);
+      return;
+    }
+    if (stage === "greeting") {
+      this.phase = "grace";
+      this.schedulePhase(this.durations.greetingGraceMs);
+      return;
+    }
+    this.phase = "retry-gap";
+    this.schedulePhase(this.durations.greetingRetryMs);
+  }
+
+  private schedulePhase(delayMs: number): void {
+    this.clearPhase();
+    this.phaseHandle = this.clock.setTimeout(() => {
+      this.phaseHandle = null;
+      this.onPhaseTimer();
     }, delayMs);
   }
 
-  private onGreetingTimer(): void {
-    if (this.disposed || !this.greetingArmed || this.farewellIssued) {
+  private onPhaseTimer(): void {
+    const phase = this.phase;
+    if (this.disposed || phase === null) {
       return;
     }
+    // A retry (or the finalize) must never land inside an active tutor turn.
+    // If one started after this phase was armed, check again shortly.
+    if (!this.handlers.isTutorIdle()) {
+      this.schedulePhase(TUTOR_BUSY_RECHECK_MS);
+      return;
+    }
+
+    if (phase === "farewell-grace") {
+      this.phase = null;
+      this.handlers.onNoChildResponseFinalize();
+      return;
+    }
+    if (!this.greetingArmed) {
+      this.phase = null;
+      return;
+    }
+
     this.greetingAttempt += 1;
     if (this.greetingAttempt <= GREETING_MAX_RETRIES) {
+      this.phase = null;
+      // Wait for the retry's own turn before counting the next gap.
+      this.awaitTutorSettle("retry");
       this.handlers.onGreetingRetry(this.greetingAttempt);
-      this.scheduleGreeting(this.durations.greetingRetryMs);
       return;
     }
 
-    // Ladder exhausted: the tutor says goodbye, then the session ends.
+    // Ladder exhausted: the tutor says goodbye, then the session ends once
+    // that farewell has finished playing.
     this.greetingArmed = false;
     this.farewellIssued = true;
+    this.phase = null;
+    this.awaitTutorSettle("farewell");
     this.handlers.onNoChildResponse();
-    this.scheduleFarewellFinalize();
   }
 
-  private scheduleFarewellFinalize(): void {
-    this.clearGreeting();
-    this.greetingHandle = this.clock.setTimeout(() => {
-      this.greetingHandle = null;
-      if (!this.disposed) {
-        this.handlers.onNoChildResponseFinalize();
-      }
-    }, this.durations.farewellGraceMs);
+  /**
+   * 10:00: the close instruction turns the mid-session watchdog into the
+   * end-phase idle timer. There is exactly one silence timer, so the two can
+   * never double-nudge or double-close.
+   */
+  private switchToEndPhase(): void {
+    this.clearSilenceTimer();
+    this.clearSilenceFallback();
+    this.silenceMode = "end";
+    this.silenceStage = "finalize";
+    this.silenceWaiting = false;
+    this.silenceTurnComplete = false;
+    this.silencePlaybackIdle = false;
+    this.silenceRemainingMs = this.durations.silenceMs;
+    this.restartSilenceStage(this.durations.silenceMs);
   }
 
-  private clearGreeting(): void {
-    if (this.greetingHandle !== null) {
-      this.clock.clearTimeout(this.greetingHandle);
-      this.greetingHandle = null;
+  /**
+   * Start the stage countdown, or pause it while the tutor is mid-turn. Start
+   * only from an observed idle point (see CONVENTIONS rule 19).
+   */
+  private restartSilenceStage(delayMs: number): void {
+    if (this.handlers.isTutorIdle()) {
+      this.startSilenceStage(delayMs);
+      return;
+    }
+    this.beginSilenceWait(delayMs);
+  }
+
+  private startSilenceStage(delayMs: number): void {
+    this.clearSilenceTimer();
+    this.clearSilenceFallback();
+    this.silenceWaiting = false;
+    this.silenceTurnComplete = false;
+    this.silencePlaybackIdle = false;
+    this.silenceRemainingMs = 0;
+    this.silenceDeadline = this.clock.now() + delayMs;
+    this.silenceTimerHandle = this.clock.setTimeout(() => {
+      this.silenceTimerHandle = null;
+      this.onSilenceTimer();
+    }, delayMs);
+  }
+
+  private beginSilenceWait(remainingMs: number): void {
+    this.clearSilenceTimer();
+    this.clearSilenceFallback();
+    this.silenceWaiting = true;
+    this.silenceTurnComplete = false;
+    this.silencePlaybackIdle = false;
+    this.silenceRemainingMs = remainingMs;
+  }
+
+  private settleSilenceWatchdog(): void {
+    if (!this.silenceWaiting) {
+      return;
+    }
+    this.clearSilenceFallback();
+    this.silenceWaiting = false;
+    this.silenceTurnComplete = false;
+    this.silencePlaybackIdle = false;
+    // Mid-session resumes the paused stage; the end phase restarts on activity.
+    const delayMs =
+      this.silenceMode === "end"
+        ? this.durations.silenceMs
+        : Math.max(1, this.silenceRemainingMs);
+    this.startSilenceStage(delayMs);
+  }
+
+  private onSilenceTimer(): void {
+    if (this.disposed || this.silenceMode === null) {
+      return;
+    }
+    // A nudge/finalize must never land inside an active tutor turn.
+    if (!this.handlers.isTutorIdle()) {
+      this.beginSilenceWait(Math.max(1, this.silenceDeadline - this.clock.now()));
+      return;
+    }
+    if (this.silenceMode === "end") {
+      this.silenceMode = null;
+      this.silenceStage = "finalize";
+      this.handlers.onSilence();
+      return;
+    }
+    if (this.silenceStage === "nudge") {
+      // One nudge per silence episode, then the graceful close. The nudge is
+      // an injected tutor turn: starting it pauses the close countdown until
+      // that turn has settled.
+      this.silenceStage = "close";
+      this.silenceRemainingMs = this.durations.midSessionCloseMs;
+      this.startSilenceStage(this.silenceRemainingMs);
+      this.handlers.onChildUnresponsiveNudge();
+      return;
+    }
+    this.silenceMode = null;
+    this.silenceStage = "finalize";
+    this.handlers.onChildUnresponsiveFinalize();
+  }
+
+  private clearPhase(): void {
+    if (this.phaseHandle !== null) {
+      this.clock.clearTimeout(this.phaseHandle);
+      this.phaseHandle = null;
     }
   }
 
-  private armSilence(): void {
-    this.clearSilence();
-    this.silenceHandle = this.clock.setTimeout(() => {
-      this.silenceHandle = null;
-      this.handlers.onSilence();
-    }, this.durations.silenceMs);
+  private clearSettleFallback(): void {
+    if (this.settleFallbackHandle !== null) {
+      this.clock.clearTimeout(this.settleFallbackHandle);
+      this.settleFallbackHandle = null;
+    }
   }
 
-  private clearSilence(): void {
-    if (this.silenceHandle !== null) {
-      this.clock.clearTimeout(this.silenceHandle);
-      this.silenceHandle = null;
+  private clearSilenceFallback(): void {
+    if (this.silenceFallbackHandle !== null) {
+      this.clock.clearTimeout(this.silenceFallbackHandle);
+      this.silenceFallbackHandle = null;
+    }
+  }
+
+  private clearSilenceTimer(): void {
+    if (this.silenceTimerHandle !== null) {
+      this.clock.clearTimeout(this.silenceTimerHandle);
+      this.silenceTimerHandle = null;
     }
   }
 }
@@ -370,6 +756,8 @@ export class Session {
   private finalizePromise: Promise<FinalizeOutcome> | null = null;
   private greetingSent = false;
   private endReason: FinalizeReason | null = null;
+  /** True from an injected turn / first tutor audio until `turn_complete`. */
+  private tutorTurnActive = false;
 
   private startedAtMs = 0;
   private micBytes = 0;
@@ -451,6 +839,11 @@ export class Session {
       onNoChildResponseFinalize: () => {
         void this.finalize("no_child_response");
       },
+      onChildUnresponsiveNudge: () => this.injectChildUnresponsiveNudge(),
+      onChildUnresponsiveFinalize: () => {
+        void this.finalize("child_unresponsive");
+      },
+      isTutorIdle: () => !this.tutorTurnActive,
     });
     this.timers.start();
     // Tests attach a client before start; the proxy attaches the WS right after
@@ -482,6 +875,9 @@ export class Session {
     if (this.state !== "live" || this.log === null || this.gemini === null) {
       return;
     }
+    // The child tapped the canvas: end the current silence episode even if the
+    // action itself turns out to be malformed.
+    this.timers?.noteChildInput();
     let text: string;
     try {
       text = formatChildAction(action);
@@ -517,8 +913,27 @@ export class Session {
       throw new SessionError(`cannot inject text in state ${this.state}`);
     }
     this.gemini.sendText(text);
+    this.tutorTurnActive = true;
     this.log.append("inject", { text, phase });
     this.timers?.notifyActivity();
+    this.timers?.noteTutorActivity();
+  }
+
+  /**
+   * The client's playback queue drained after the current tutor turn
+   * (PROTOCOL §2 `tutor_playback_idle`). Recorded as the audio-end timestamp
+   * and used to arm the start-failsafe / farewell grace.
+   */
+  handleTutorPlaybackIdle(): void {
+    if (this.state !== "live" || this.log === null) {
+      return;
+    }
+    this.log.append("turn_event", { event: "tutor_playback_idle" });
+    // A drain mid-turn is just a gap in the stream: it must not settle the
+    // ladder, or a retry could still land inside the tutor's own speech.
+    if (!this.tutorTurnActive) {
+      this.timers?.noteTutorPlaybackIdle();
+    }
   }
 
   /** Idempotent finalize; every path runs the same end sequence. */
@@ -611,10 +1026,12 @@ export class Session {
     if (this.state !== "live" || this.log === null) {
       return;
     }
+    this.tutorTurnActive = true;
     this.log.appendTutor(pcm24k);
     this.tutorBytes += pcm24k.byteLength;
     this.client?.sendBinary(pcm24k);
     this.timers?.notifyActivity();
+    this.timers?.noteTutorActivity();
   }
 
   private onTranscript(role: TranscriptRole, text: string, partial: boolean): void {
@@ -627,6 +1044,11 @@ export class Session {
       // The child is there: stop the start-failsafe ladder on the first sign of
       // speech (interim or final). Raw mic frames are continuous and do not count.
       this.timers?.disarmGreetingWatchdog();
+      this.timers?.noteChildInput();
+    } else {
+      // Tutor speech means the child is (naturally) quiet: pause the
+      // mid-session silence countdown until this turn settles.
+      this.timers?.noteTutorActivity();
     }
     if (!partial) {
       this.timers?.notifyActivity();
@@ -676,7 +1098,10 @@ export class Session {
 
     try {
       this.gemini.sendToolResponses(responses);
+      // The model continues speaking after the tool response: a new turn.
+      this.tutorTurnActive = true;
       this.timers?.notifyActivity();
+      this.timers?.noteTutorActivity();
     } catch (error) {
       const message = errorMessage(error);
       this.log.append("turn_event", { event: "error", phase: "tool_response", message });
@@ -716,7 +1141,12 @@ export class Session {
     this.log.append("turn_event", { event });
     this.client?.sendJson({ type: "turn", event });
     if (event === "turn_complete") {
+      this.tutorTurnActive = false;
       this.timers?.notifyActivity();
+      this.timers?.noteTutorTurnComplete();
+    } else if (event === "interrupted") {
+      this.tutorTurnActive = false;
+      this.timers?.noteTutorInterrupted();
     }
   }
 
@@ -798,6 +1228,9 @@ export class Session {
     try {
       this.sendTextTurn(GREETING_INSTRUCTION, "greeting");
       this.timers?.armGreetingWatchdog();
+      // The mid-session watchdog starts counting only once this greeting turn
+      // has settled; the greeting failsafe still owns the no-response case.
+      this.timers?.armChildSilenceWatchdog();
     } catch (error) {
       const message = errorMessage(error);
       this.log.append("turn_event", { event: "error", phase: "greeting", message });
@@ -813,6 +1246,11 @@ export class Session {
 
   private injectNoResponseFarewell(): void {
     this.injectFailsafe(NO_RESPONSE_FAREWELL);
+  }
+
+  /** One mid-session "are you there?" nudge per silence episode (U14.1). */
+  private injectChildUnresponsiveNudge(): void {
+    this.injectFailsafe(CHILD_UNRESPONSIVE_NUDGE);
   }
 
   private injectFailsafe(text: string): void {

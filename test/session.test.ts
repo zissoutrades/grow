@@ -11,6 +11,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  CHILD_UNRESPONSIVE_NUDGE,
   CLOSE_INSTRUCTION,
   GREETING_INSTRUCTION,
   GREETING_RETRY_INSTRUCTIONS,
@@ -84,6 +85,8 @@ async function startSession(
     closeInstructionMs: number;
     hardCapMs: number;
     silenceMs: number;
+    midSessionNudgeMs: number;
+    midSessionCloseMs: number;
     greetingGraceMs: number;
     greetingRetryMs: number;
     farewellGraceMs: number;
@@ -133,7 +136,19 @@ afterEach(() => {
   }
 });
 
+/** The tutor's turn ended and its audio stopped playing (U13.2/U13.3). */
+function settleTutor(harness: { session: Session; gemini: FakeGemini }): void {
+  harness.gemini.callbacks.onTurnEvent("turn_complete");
+  harness.session.handleTutorPlaybackIdle();
+}
+
 describe("Session", () => {
+  test("the greeting instruction tells the tutor to wait for the child", () => {
+    expect(GREETING_INSTRUCTION).toContain("дождись ответа ребёнка");
+    expect(GREETING_INSTRUCTION).toContain("только после того, как ребёнок ответит");
+    expect(GREETING_INSTRUCTION).not.toContain("сразу переходи");
+  });
+
   test("greets first after setup instead of waiting for the child", async () => {
     const { session, gemini } = await startSession();
 
@@ -157,8 +172,8 @@ describe("Session", () => {
     await session.finalize("child_tap");
   });
 
-  test("walks the no-response failsafe and skips the after-loop", async () => {
-    const { session, gemini, clock, sink, workspacePath } = await startSession({
+  test("does not start the watchdog until the greeting turn has settled", async () => {
+    const { session, gemini, clock } = await startSession({
       closeInstructionMs: 100_000,
       hardCapMs: 100_000,
       silenceMs: 100_000,
@@ -166,18 +181,62 @@ describe("Session", () => {
       greetingRetryMs: 1_000,
       farewellGraceMs: 500,
     });
+
+    // The grace is measured from the end of the greeting, not from injection.
+    clock.advance(60_000);
     expect(gemini.sentTexts).toEqual([GREETING_INSTRUCTION]);
 
+    settleTutor({ session, gemini });
+    clock.advance(1_000);
+    expect(gemini.sentTexts).toContain(GREETING_RETRY_INSTRUCTIONS[0]);
+    await session.finalize("child_tap");
+  });
+
+  test("falls back to turn_complete + 2 s when playback idle is missed", async () => {
+    const { session, gemini, clock } = await startSession({
+      closeInstructionMs: 100_000,
+      hardCapMs: 100_000,
+      silenceMs: 100_000,
+      greetingGraceMs: 1_000,
+      greetingRetryMs: 1_000,
+      farewellGraceMs: 500,
+    });
+
+    gemini.callbacks.onTurnEvent("turn_complete");
+    clock.advance(2_000 + 999);
+    expect(gemini.sentTexts).toEqual([GREETING_INSTRUCTION]);
+
+    clock.advance(1);
+    expect(gemini.sentTexts).toContain(GREETING_RETRY_INSTRUCTIONS[0]);
+    await session.finalize("child_tap");
+  });
+
+  test("walks the no-response failsafe and skips the after-loop", async () => {
+    const harness = await startSession({
+      closeInstructionMs: 100_000,
+      hardCapMs: 100_000,
+      silenceMs: 100_000,
+      greetingGraceMs: 1_000,
+      greetingRetryMs: 1_000,
+      farewellGraceMs: 500,
+    });
+    const { session, gemini, clock, sink, workspacePath } = harness;
+    expect(gemini.sentTexts).toEqual([GREETING_INSTRUCTION]);
+
+    settleTutor(harness);
     clock.advance(1_000);
     expect(gemini.sentTexts).toContain(GREETING_RETRY_INSTRUCTIONS[0]);
 
+    settleTutor(harness);
     clock.advance(1_000);
     expect(gemini.sentTexts).toContain(GREETING_RETRY_INSTRUCTIONS[1]);
 
+    settleTutor(harness);
     clock.advance(1_000);
     expect(gemini.sentTexts).toContain(NO_RESPONSE_FAREWELL);
     expect(session.currentState).toBe("live");
 
+    settleTutor(harness);
     clock.advance(500);
     const folder = await session.finalize("no_child_response");
 
@@ -209,7 +268,7 @@ describe("Session", () => {
   });
 
   test("the first child transcript disarms the start failsafe", async () => {
-    const { session, gemini, clock } = await startSession({
+    const harness = await startSession({
       closeInstructionMs: 100_000,
       hardCapMs: 100_000,
       silenceMs: 100_000,
@@ -217,13 +276,102 @@ describe("Session", () => {
       greetingRetryMs: 1_000,
       farewellGraceMs: 500,
     });
+    const { session, gemini, clock } = harness;
 
+    settleTutor(harness);
     gemini.callbacks.onTranscript("child", "Привет", false);
     clock.advance(60_000);
 
     expect(gemini.sentTexts).toEqual([GREETING_INSTRUCTION]);
     expect(session.currentState).toBe("live");
     await session.finalize("child_tap");
+  });
+
+  test("records tutor_playback_idle and arms the ladder from it", async () => {
+    const harness = await startSession({
+      closeInstructionMs: 100_000,
+      hardCapMs: 100_000,
+      silenceMs: 100_000,
+      greetingGraceMs: 1_000,
+      greetingRetryMs: 1_000,
+      farewellGraceMs: 500,
+    });
+    const { session, gemini, clock } = harness;
+
+    // An idle report before the turn completes must not start the clock.
+    session.handleTutorPlaybackIdle();
+    clock.advance(60_000);
+    expect(gemini.sentTexts).toEqual([GREETING_INSTRUCTION]);
+
+    gemini.callbacks.onTurnEvent("turn_complete");
+    session.handleTutorPlaybackIdle();
+    clock.advance(999);
+    expect(gemini.sentTexts).toEqual([GREETING_INSTRUCTION]);
+    clock.advance(1);
+    expect(gemini.sentTexts).toContain(GREETING_RETRY_INSTRUCTIONS[0]);
+
+    const folder = await session.finalize("child_tap");
+    const records = readJournal(join(folder, "session.jsonl"));
+    const idle = records.find(
+      (record) => record.kind === "turn_event" && record.event === "tutor_playback_idle",
+    );
+    expect(idle).toBeDefined();
+    expect(typeof idle?.ts).toBe("string");
+  });
+
+  test("nudges a silent child mid-session, then closes with child_unresponsive", async () => {
+    const harness = await startSession({
+      closeInstructionMs: 1_000_000,
+      hardCapMs: 2_000_000,
+      silenceMs: 1_000_000,
+      midSessionNudgeMs: 1_000,
+      midSessionCloseMs: 500,
+      greetingGraceMs: 1_000,
+      greetingRetryMs: 1_000,
+      farewellGraceMs: 500,
+    });
+    const { session, gemini, clock, sink, workspacePath } = harness;
+
+    // The greeting turn settles, the child answers it (disarming the greeting
+    // ladder), and the mid-session watchdog starts counting child silence.
+    settleTutor(harness);
+    gemini.callbacks.onTranscript("child", "Да", false);
+    clock.advance(999);
+    expect(gemini.sentTexts).not.toContain(CHILD_UNRESPONSIVE_NUDGE);
+    clock.advance(1);
+    expect(gemini.sentTexts).toContain(CHILD_UNRESPONSIVE_NUDGE);
+
+    // The nudge is an injected tutor turn: the close countdown resumes only
+    // after that turn's audio has ended.
+    settleTutor(harness);
+    clock.advance(500);
+
+    const folder = await session.finalize("child_tap");
+    expect(session.currentState).toBe("done");
+    expect(session.getStatus()).toEqual({
+      afterStatus: "done",
+      written: ["diary", "report", "plan"],
+      reason: "child_unresponsive",
+    });
+
+    const records = readJournal(join(folder, "session.jsonl"));
+    const end = records.find((record) => record.kind === "session_end");
+    expect(end?.reason).toBe("child_unresponsive");
+    const nudge = records.find(
+      (record) => record.kind === "inject" && record.phase === "failsafe",
+    );
+    expect(nudge?.text).toBe(CHILD_UNRESPONSIVE_NUDGE);
+    const after = records.find((record) => record.kind === "after");
+    expect(after?.status).toBe("done");
+    expect(sink.json.some((message) => message.type === "session_saved")).toBe(true);
+
+    // Unlike no_child_response, a mid-session close has content worth keeping.
+    expect(existsSync(join(workspacePath, "reports"))).toBe(true);
+    expect(existsSync(join(workspacePath, "memory/diary"))).toBe(true);
+  });
+
+  test("the mid-session nudge asks the tutor to say the close warning", () => {
+    expect(CHILD_UNRESPONSIVE_NUDGE).toContain("Ты здесь? Если тебя нет — я завершу занятие.");
   });
 
   test("relays audio, logs records, and stamps WAVs at finalize", async () => {
@@ -321,15 +469,23 @@ describe("Session", () => {
   });
 
   test("finalizes with reason silence after the idle timer", async () => {
-    const { session, clock } = await startSession({
+    const harness = await startSession({
       closeInstructionMs: 1_000,
       hardCapMs: 100_000,
       silenceMs: 500,
     });
+    const { session, gemini, clock } = harness;
 
     clock.advance(1_000);
-    clock.advance(500);
-    const folder = await session.finalize("silence");
+    // The close instruction is itself a tutor turn; the end-phase idle timer
+    // starts only once that turn's audio has ended (CONVENTIONS rule 19).
+    settleTutor(harness);
+    clock.advance(499);
+    expect(session.currentState).toBe("live");
+    clock.advance(1);
+
+    const folder = await session.finalize("child_tap");
+    expect(session.getStatus().reason).toBe("silence");
 
     const records = readJournal(join(folder, "session.jsonl"));
     const end = records.find((record) => record.kind === "session_end");

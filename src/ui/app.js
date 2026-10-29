@@ -19,6 +19,14 @@ const WORKLET_URL = new URL("./worklets.js", import.meta.url).href;
 const WORKSPACE_STORAGE_KEY = "grow.workspacePath";
 const AFTER_POLL_MS = 1500;
 const AFTER_POLL_LIMIT = 40;
+/**
+ * If the proxy never confirms a close, re-enable the button so the parent can
+ * retry (finalize is idempotent). This guards every "disabled while closing"
+ * state against ending up permanently grey.
+ */
+const CLOSE_REENABLE_MS = 20_000;
+/** Empty playback buffer this long after turn_complete = audio really ended. */
+const PLAYBACK_IDLE_DEBOUNCE_MS = 300;
 
 const BEAT_LABELS = {
   recall: "вспоминаем",
@@ -89,8 +97,12 @@ const state = {
   transcript: initialTranscriptState(),
   beat: null,
   closing: false,
+  closeGuardTimer: null,
   saved: false,
   afterFinal: false,
+  turnCompleteSeen: false,
+  playbackDrained: false,
+  playbackIdleTimer: null,
 };
 
 // --- Screens and status ---------------------------------------------------
@@ -114,6 +126,33 @@ function setAfterStatus(text, isError = false) {
 
 function setClock(text) {
   clockEl.textContent = text;
+}
+
+// --- Close button state ---------------------------------------------------
+
+function setCloseEnabled(enabled) {
+  closeButton.disabled = !enabled;
+}
+
+function clearCloseGuard() {
+  if (state.closeGuardTimer !== null) {
+    clearTimeout(state.closeGuardTimer);
+    state.closeGuardTimer = null;
+  }
+}
+
+/** A close request is in flight: disable until saved, but never forever. */
+function armCloseGuard() {
+  clearCloseGuard();
+  state.closeGuardTimer = setTimeout(() => {
+    state.closeGuardTimer = null;
+    if (state.saved || state.afterFinal) {
+      return;
+    }
+    state.closing = false;
+    setCloseEnabled(true);
+    setStatus("Завершение затянулось. Попробуйте ещё раз.", "error");
+  }, CLOSE_REENABLE_MS);
 }
 
 function renderBeat() {
@@ -247,6 +286,13 @@ async function openAudio() {
       }
     };
 
+    playerNode.port.onmessage = (event) => {
+      if (state.audio !== audio) {
+        return;
+      }
+      handlePlayerMessage(event.data);
+    };
+
     return audio;
   } catch (error) {
     void captureCtx.close().catch((closeError) => {
@@ -279,6 +325,7 @@ function stopCapture() {
 
 function closeAudio() {
   stopCapture();
+  cancelPlaybackIdle();
   const audio = state.audio;
   state.audio = null;
   if (audio === null) {
@@ -305,9 +352,61 @@ function playTutorAudio(bytes) {
   if (evenBytes === 0) {
     return;
   }
+  // New audio starts a new tutor turn: the queue is no longer drained and the
+  // previous turn's turn_complete is stale.
+  state.turnCompleteSeen = false;
+  state.playbackDrained = false;
+  cancelPlaybackIdle();
   const pcm = new Int16Array(bytes.buffer, bytes.byteOffset, evenBytes / 2);
   const samples = int16ToFloat32(pcm);
   audio.playerNode.port.postMessage({ type: "pcm", samples }, [samples.buffer]);
+}
+
+// --- Tutor playback end (PROTOCOL §2 tutor_playback_idle) -----------------
+
+function handlePlayerMessage(data) {
+  if (data === null || typeof data !== "object") {
+    return;
+  }
+  if (data.type === "drained") {
+    state.playbackDrained = true;
+    schedulePlaybackIdle();
+  }
+}
+
+/**
+ * The proxy needs the real end of the tutor's audio, not just turn_complete:
+ * only report idle once the proxy's turn_complete arrived AND the player's
+ * buffer has stayed empty for the debounce window. `turn_complete` alone is
+ * not enough because audio is still queued locally when it arrives.
+ */
+function schedulePlaybackIdle() {
+  if (!state.turnCompleteSeen || !state.playbackDrained) {
+    return;
+  }
+  cancelPlaybackIdle();
+  state.playbackIdleTimer = setTimeout(() => {
+    state.playbackIdleTimer = null;
+    if (!state.turnCompleteSeen || !state.playbackDrained || state.closing) {
+      return;
+    }
+    state.turnCompleteSeen = false;
+    state.playbackDrained = false;
+    state.client?.sendPlaybackIdle();
+  }, PLAYBACK_IDLE_DEBOUNCE_MS);
+}
+
+function cancelPlaybackIdle() {
+  if (state.playbackIdleTimer !== null) {
+    clearTimeout(state.playbackIdleTimer);
+    state.playbackIdleTimer = null;
+  }
+}
+
+function resetPlaybackIdle() {
+  cancelPlaybackIdle();
+  state.turnCompleteSeen = false;
+  state.playbackDrained = false;
 }
 
 // --- Canvas taps ----------------------------------------------------------
@@ -353,6 +452,10 @@ function handleEvent(message) {
     case "turn":
       if (message.event === "interrupted") {
         flushPlayback();
+        resetPlaybackIdle();
+      } else if (message.event === "turn_complete") {
+        state.turnCompleteSeen = true;
+        schedulePlaybackIdle();
       }
       break;
     case "session_saved":
@@ -376,11 +479,13 @@ function handleSessionSaved(message) {
   }
   state.saved = true;
   state.closing = true;
+  clearCloseGuard();
+  resetPlaybackIdle();
   const failed = message.reason === "no_child_response";
   stopClock();
   stopCapture();
   closeAudio();
-  closeButton.disabled = true;
+  setCloseEnabled(false);
   showScreen("closed");
   newSessionButton.disabled = !state.afterFinal;
   if (!state.afterFinal) {
@@ -490,12 +595,17 @@ function resetSessionUi() {
   state.saved = false;
   state.afterFinal = false;
   state.pollAttempts = 0;
+  resetPlaybackIdle();
   canvasView.render(state.canvas);
   renderTranscript();
   renderBeat();
   setClock("00:00");
   setAfterStatus("после сессии: —");
   newSessionButton.disabled = true;
+  // A previous session disabled this on save; a live session must always be
+  // closeable from the child UI (U14.2).
+  clearCloseGuard();
+  setCloseEnabled(true);
 }
 
 async function startSession() {
@@ -518,7 +628,14 @@ async function startSession() {
   state.client = createProxyClient({
     onEvent: handleEvent,
     onAudio: playTutorAudio,
-    onOpen: () => setStatus(audioError ?? "Занятие идёт", audioError === null ? "ok" : "error"),
+    onOpen: () => {
+      setStatus(audioError ?? "Занятие идёт", audioError === null ? "ok" : "error");
+      // The client is attached: a live session must be closeable even if a
+      // previous session's save left the button disabled.
+      if (!state.saved && !state.closing) {
+        setCloseEnabled(true);
+      }
+    },
     onClose: handleSocketClose,
     onError: (message) => setStatus(message, "error"),
   });
@@ -540,6 +657,7 @@ async function startSession() {
     state.client.connect(started.sessionId);
 
     showScreen("session");
+    setCloseEnabled(true);
     state.startedAt = Date.now();
     startClock();
     setStatus(audioError ?? "Подключаемся…", audioError === null ? "info" : "error");
@@ -591,7 +709,8 @@ async function closeSession() {
     return;
   }
   state.closing = true;
-  closeButton.disabled = true;
+  setCloseEnabled(false);
+  armCloseGuard();
   stopCapture();
   setStatus("Завершаем занятие…");
 
@@ -605,8 +724,9 @@ async function closeSession() {
     await state.client.closeHttp("child_tap");
     handleSessionSaved({ reason: "child_tap", sessionId: state.sessionId });
   } catch (error) {
+    clearCloseGuard();
     state.closing = false;
-    closeButton.disabled = false;
+    setCloseEnabled(true);
     setStatus(
       `Не удалось завершить занятие: ${error instanceof Error ? error.message : String(error)}`,
       "error",
@@ -619,10 +739,16 @@ function handleSocketClose() {
     return;
   }
   if (state.closing) {
+    // The close may already be finalizing server-side; the guard re-enables
+    // the button if the confirmation never arrives.
     setStatus("Соединение закрыто. Проверяем сохранение…");
     startAfterPolling();
     return;
   }
+  // With the socket gone, POST /api/close is the fallback path: keep the
+  // button usable.
+  clearCloseGuard();
+  setCloseEnabled(true);
   setStatus("Соединение с прокси закрыто.", "error");
   stopCapture();
   closeAudio();

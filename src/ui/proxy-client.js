@@ -153,6 +153,22 @@ export function createProxyClient(handlers = {}, options = {}) {
     }
   }
 
+  /**
+   * Send {"type":"tutor_playback_idle"} (PROTOCOL §2). Returns false when the
+   * socket is not open; the proxy falls back to turn_complete timing.
+   */
+  function sendPlaybackIdle() {
+    if (!isOpen()) {
+      return false;
+    }
+    try {
+      socket.send(JSON.stringify({ type: "tutor_playback_idle" }));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   async function closeHttp(reason = "child_tap") {
     if (sessionId === null) {
       throw new ProxyClientError("нет сессии для завершения");
@@ -214,6 +230,7 @@ export function createProxyClient(handlers = {}, options = {}) {
     sendAudio,
     sendChildAction,
     requestClose,
+    sendPlaybackIdle,
     closeHttp,
     getSessionStatus,
     disconnect,

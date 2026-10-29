@@ -328,6 +328,12 @@ function handleWsText(session: Session, raw: string): void {
     void session.finalize("child_tap");
     return;
   }
+  if (message.type === "tutor_playback_idle") {
+    // The client's playback queue drained: the real end of tutor audio
+    // (PROTOCOL §2). Used to arm the start-failsafe/farewell grace.
+    session.handleTutorPlaybackIdle();
+    return;
+  }
   if (message.type === "child_action") {
     if (!isChildActionKind(message.kind)) {
       session.notifyClientError("child_action.kind must be choice, tenframe, or numberline");

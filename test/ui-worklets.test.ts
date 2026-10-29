@@ -76,6 +76,42 @@ describe("player worklet", () => {
     expect(silence.every((sample) => sample === 0)).toBe(true);
   });
 
+  test("posts drained once after the queued audio is consumed", () => {
+    const Processor = registry["grow-player"];
+    const processor = new Processor();
+    const port = processor.port as FakePort;
+
+    const samples = new Float32Array(4800).fill(0.5);
+    port.onmessage?.({ data: { type: "pcm", samples } });
+    // Silence before any queue drains must not report an idle queue.
+    expect(port.sent).toEqual([]);
+
+    const output = new Float32Array(256);
+    for (let index = 0; index < 100; index += 1) {
+      processor.process([], [[output]]);
+    }
+
+    expect(port.sent).toEqual([{ type: "drained" }]);
+
+    // Empty blocks afterwards stay quiet: one drain signal per playback run.
+    processor.process([], [[output]]);
+    expect(port.sent).toEqual([{ type: "drained" }]);
+  });
+
+  test("does not post drained for a flush", () => {
+    const Processor = registry["grow-player"];
+    const processor = new Processor();
+    const port = processor.port as FakePort;
+
+    port.onmessage?.({ data: { type: "pcm", samples: new Float32Array(4800).fill(0.5) } });
+    port.onmessage?.({ data: { type: "flush" } });
+
+    const output = new Float32Array(256);
+    processor.process([], [[output]]);
+
+    expect(port.sent).toEqual([]);
+  });
+
   test("outputs silence when the queue is empty", () => {
     const Processor = registry["grow-player"];
     const processor = new Processor();

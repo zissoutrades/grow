@@ -47,7 +47,9 @@ class CaptureProcessor extends AudioWorkletProcessor {
 /**
  * Tutor playback: one queue of 24 kHz float samples. process() resamples to
  * the device rate with linear interpolation. `flush` empties the queue on a
- * barge-in (`turn` / `interrupted`).
+ * barge-in (`turn` / `interrupted`). When the queue drains after playing audio,
+ * post `{type: "drained"}`: the main thread turns that into the debounced
+ * `tutor_playback_idle` WS message (PROTOCOL §2).
  */
 class PlayerProcessor extends AudioWorkletProcessor {
   constructor() {
@@ -56,6 +58,7 @@ class PlayerProcessor extends AudioWorkletProcessor {
     this.position = 0;
     this.ratio = PLAYBACK_SAMPLE_RATE / sampleRate;
     this.maxSamples = PLAYBACK_SAMPLE_RATE * MAX_QUEUED_SECONDS;
+    this.drained = true;
     this.port.onmessage = (event) => {
       const data = event.data;
       if (data === null || typeof data !== "object") {
@@ -73,6 +76,7 @@ class PlayerProcessor extends AudioWorkletProcessor {
     if (samples.length === 0) {
       return;
     }
+    this.drained = false;
 
     const overflow = Math.max(0, this.buffer.length + samples.length - this.maxSamples);
     if (overflow > 0) {
@@ -94,6 +98,7 @@ class PlayerProcessor extends AudioWorkletProcessor {
   flush() {
     this.buffer = new Float32Array(0);
     this.position = 0;
+    this.drained = true;
   }
 
   process(_inputs, outputs) {
@@ -105,6 +110,7 @@ class PlayerProcessor extends AudioWorkletProcessor {
     const frame = new Float32Array(channels[0].length);
     const buffer = this.buffer;
     let position = this.position;
+    const hadAudio = buffer.length >= 2;
 
     if (buffer.length >= 2) {
       for (let index = 0; index < frame.length; index += 1) {
@@ -127,6 +133,11 @@ class PlayerProcessor extends AudioWorkletProcessor {
 
     for (const channel of channels) {
       channel.set(frame);
+    }
+
+    if (hadAudio && this.buffer.length < 2 && !this.drained) {
+      this.drained = true;
+      this.port.postMessage({ type: "drained" });
     }
     return true;
   }
