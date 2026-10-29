@@ -60,6 +60,18 @@ describe("buildPackage", () => {
     ]);
   });
 
+  test("treats a same-date suffixed plan as newer than the plain plan", () => {
+    const folder = workspace();
+    writeFileSync(join(folder, "plans/lesson-2026-10-27-1530.md"), "РЕВИЗИЯ\n");
+    writeFileSync(join(folder, "plans/lesson-2026-10-27-1530-b.md"), "ВТОРАЯ РЕВИЗИЯ\n");
+
+    expect(findNewestLesson(folder)).toBe("plans/lesson-2026-10-27-1530-b.md");
+
+    // A later date still outranks any same-day suffix.
+    writeFileSync(join(folder, "plans/lesson-2026-10-28.md"), "СЛЕДУЮЩИЙ ДЕНЬ\n");
+    expect(findNewestLesson(folder)).toBe("plans/lesson-2026-10-28.md");
+  });
+
   test("includes the newest lesson by date-prefixed filename only", () => {
     const folder = workspace();
 
@@ -70,6 +82,21 @@ describe("buildPackage", () => {
     expect(result.files.map((file) => file.path)).not.toContain(
       "plans/lesson-2026-10-01.md",
     );
+  });
+
+  test("asks for something on the canvas by the first beat transition", () => {
+    const folder = workspace();
+
+    const result = buildPackage(folder);
+
+    expect(result.systemInstruction).toContain(
+      "К концу первого перехода между этапами что-то должно появиться на холсте — не оставляй холст пустым.",
+    );
+    const advanceBeat = result.systemInstruction.indexOf(
+      "На каждом переходе между этапами урока вызывай инструмент advance_beat.",
+    );
+    const kickoff = result.systemInstruction.indexOf("К концу первого перехода");
+    expect(kickoff).toBeGreaterThan(advanceBeat);
   });
 
   test("omits the lesson section when no plan exists", () => {

@@ -227,6 +227,34 @@ describe("after-loop", () => {
     });
   });
 
+  test("does not clobber a plan written for the same date by the console", async () => {
+    const fixturePaths = fixture();
+    const consolePlan = "# План 31 октября из консоли\n\n1. Ответ на запрос родителя.\n";
+    const target = join(fixturePaths.workspacePath, "plans/lesson-2026-10-31.md");
+    // The console writes the same next-date plan while the after-loop's model
+    // call is in flight (the observed defect: the later writer won).
+    const model: AfterContext["generateText"] = async () => {
+      writeFileSync(target, consolePlan, "utf8");
+      return JSON.stringify(PAYLOAD);
+    };
+
+    const result = await runAfterLoop(context(fixturePaths, model));
+
+    expect(result).toEqual({ status: "done", written: ["diary", "report", "plan"] });
+    // The console revision survives byte-for-byte; the after-loop suffixes its
+    // plan with the session time instead of overwriting it.
+    expect(readFileSync(target, "utf8")).toBe(consolePlan);
+    expect(
+      readFileSync(
+        join(fixturePaths.workspacePath, "plans/lesson-2026-10-31-0930.md"),
+        "utf8",
+      ),
+    ).toBe(`${PAYLOAD.planRevision}\n`);
+    expect(lastRecord(fixturePaths.sessionFolder).paths).toMatchObject({
+      plan: "plans/lesson-2026-10-31-0930.md",
+    });
+  });
+
   test("extracts the JSON payload when it is wrapped in a code fence", async () => {
     const fixturePaths = fixture();
     const fenced = `\`\`\`json\n${JSON.stringify(PAYLOAD)}\n\`\`\``;
@@ -282,6 +310,17 @@ describe("after-loop", () => {
     expect(nextLessonDateFor(fixturePaths.workspacePath, "2026-10-30")).toBe("2026-10-31");
 
     writeFileSync(join(fixturePaths.workspacePath, "plans/lesson-2026-11-02.md"), "# future\n");
+    expect(nextLessonDateFor(fixturePaths.workspacePath, "2026-10-30")).toBe("2026-11-03");
+  });
+
+  test("derives the next lesson date from a time-suffixed newest plan", () => {
+    const fixturePaths = fixture();
+
+    writeFileSync(
+      join(fixturePaths.workspacePath, "plans/lesson-2026-11-02-1530.md"),
+      "# future revision\n",
+    );
+
     expect(nextLessonDateFor(fixturePaths.workspacePath, "2026-10-30")).toBe("2026-11-03");
   });
 

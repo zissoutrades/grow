@@ -7,7 +7,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
-import { nextLessonDateFor } from "./after";
+import { firstFreePath, formatTimeSuffix, nextLessonDateFor } from "./after";
 import { findNewestLesson } from "./package";
 import { generateText } from "./text-model";
 
@@ -103,6 +103,8 @@ interface ToolContext {
   readonly workspacePath: string;
   readonly generateText: GenerateText;
   readonly now: () => Date;
+  /** The parent's current chat message; plan revision must honour it. */
+  readonly parentMessage: string;
 }
 
 // --- Workspace reads -------------------------------------------------------
@@ -226,6 +228,7 @@ export async function consoleChat(
     workspacePath: options.workspacePath,
     generateText: generate,
     now: options.now ?? (() => new Date()),
+    parentMessage: message.trim(),
   };
   const system = managerSystemPrompt();
   const actions: ConsoleAction[] = [];
@@ -315,7 +318,8 @@ function editConfigTool(
 
 /**
  * Revise the newest lesson plan from the latest session log. One text-model
- * call; writes `plans/lesson-<next-date>.md`.
+ * call; writes `plans/lesson-<next-date>.md`, or a time-suffixed name when
+ * that path is already taken (never overwrite a same-day plan).
  *
  * This deliberately duplicates the after-loop's revision prompt (U3 owns the
  * after-loop copy): the console must work even when the after-loop is
@@ -337,6 +341,7 @@ async function revisePlan(
 
   const prompt = [
     "Пересмотри план следующего занятия Grow с учётом журнала последней сессии.",
+    `Запрос родителя из чата: ${context.parentMessage} — обязательно отрази его в плане.`,
     "Ребёнку шесть лет, тема — арифметика и состав числа 10.",
     "",
     `Текущий план${lessonPath === null ? "" : ` (${lessonPath})`}:`,
@@ -348,17 +353,32 @@ async function revisePlan(
     "План короткий: цель, 5–7 шагов, чем закончить.",
   ].join("\n");
 
+  // Pin the target date before the model call, as the after-loop does: the
+  // date comes from the workspace, not the model output. The collision check
+  // stays at write time, so a plan written during the call still wins.
+  const nextLessonDate = nextLessonDateFor(
+    context.workspacePath,
+    sessionDateFromLog(session?.path ?? null, context.now()),
+    context.now,
+  );
+
   const revised = (await context.generateText(prompt, REVISION_SYSTEM)).trim();
   if (revised.length === 0) {
     throw new ConsoleError("модель вернула пустой план");
   }
 
-  const path = `plans/lesson-${nextLessonDateFor(
-    context.workspacePath,
-    sessionDateFromLog(session?.path ?? null, context.now()),
-    context.now,
-  )}.md`;
-  const before = readWorkspaceText(context.workspacePath, path) ?? "";
+  // Never overwrite an existing plan for the same date: the after-loop may
+  // have written it already. Collide onto `lesson-<date>-<hhmm>.md` (rule 17).
+  const path = firstFreePath(
+    `plans/lesson-${nextLessonDate}.md`,
+    `plans/lesson-${nextLessonDate}-${formatTimeSuffix(context.now())}.md`,
+    (relativePath) => existsSync(join(context.workspacePath, relativePath)),
+  );
+  // The diff compares the revised plan against the plan it revises, not against
+  // the (usually brand-new, therefore empty) target file. Diffing the target
+  // path made every revision look like it replaced an empty file.
+  const before =
+    lessonPath === null ? "" : (readWorkspaceText(context.workspacePath, lessonPath) ?? "");
   const content = `${stripFences(revised)}\n`;
   const absolute = join(context.workspacePath, path);
   mkdirSync(dirname(absolute), { recursive: true });

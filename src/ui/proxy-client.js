@@ -185,10 +185,14 @@ export function createProxyClient(handlers = {}, options = {}) {
       );
     }
     return {
-      afterStatus: payload.afterStatus === "done" || payload.afterStatus === "error"
-        ? payload.afterStatus
-        : "running",
+      afterStatus:
+        payload.afterStatus === "done" ||
+        payload.afterStatus === "error" ||
+        payload.afterStatus === "skipped"
+          ? payload.afterStatus
+          : "running",
       written: Array.isArray(payload.written) ? payload.written.map(String) : [],
+      reason: typeof payload.reason === "string" ? payload.reason : null,
     };
   }
 

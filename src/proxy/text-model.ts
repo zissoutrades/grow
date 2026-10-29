@@ -18,7 +18,10 @@ export type TextModelFn = (prompt: string, system?: string) => Promise<string>;
 export const DEFAULT_TEXT_MODEL = "gemini-3.1-pro-preview";
 
 const API_ROOT = "https://generativelanguage.googleapis.com/v1beta/models";
-const REQUEST_TIMEOUT_MS = 60_000;
+// 120 s: Gemini latency variance is real (500s/"high demand" observed
+// 2026-10-29 on top of thinking time) and the after-loop is async, so a longer
+// cap costs nothing; the console manager caps the tool loop at 3 rounds.
+const REQUEST_TIMEOUT_MS = 120_000;
 
 export class TextModelError extends Error {
   /** HTTP status, or null when the request never reached a response. */
@@ -61,6 +64,13 @@ export async function generateText(prompt: string, system?: string): Promise<str
 
   const requestBody: Record<string, unknown> = {
     contents: [{ role: "user", parts: [{ text: prompt }] }],
+    // Gemini 3 models default to `medium` thinking on generateContent (a bare
+    // "say hi" took 129 s with gemini-3.8-flash on 2026-10-29). `low` is the
+    // latency-oriented level and is supported on 3.8-flash; `minimal` is not
+    // (it errors on that model). Gemini 3 takes the `thinkingLevel` string
+    // enum, not the 2.5-era `thinkingBudget`.
+    // https://ai.google.dev/gemini-api/docs/generate-content/thinking
+    generationConfig: { thinkingConfig: { thinkingLevel: "low" } },
   };
   if (system !== undefined && system.length > 0) {
     requestBody.systemInstruction = { parts: [{ text: system }] };

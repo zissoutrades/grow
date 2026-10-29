@@ -186,7 +186,11 @@ function handleSessionStatus(pathname: string): Response {
     return json({ error: `unknown session: ${sessionId}` }, 404);
   }
   const status = session.getStatus();
-  return json({ afterStatus: status.afterStatus, written: status.written });
+  return json({
+    afterStatus: status.afterStatus,
+    written: status.written,
+    reason: status.reason,
+  });
 }
 
 const CONSOLE_WORKSPACE_ERROR =

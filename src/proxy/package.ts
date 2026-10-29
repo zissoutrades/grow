@@ -33,11 +33,15 @@ const REQUIRED_FILES = [
 const RUNTIME_INSTRUCTIONS = [
   "Ты — голосовой репетитор по математике для ребёнка шести лет.",
   "Говори только по-русски, короткими фразами, по одной мысли за раз.",
+  "Отвечай и пиши только по-русски кириллицей.",
   "Слушай ребёнка и опирайся на учебный план ниже; не пересказывай его вслух.",
+  "Состояние холста — источник истины о клетках и виджетах; формулируй следующий вопрос по состоянию холста, а не по предыдущим догадкам ребёнка.",
   "На каждом переходе между этапами урока вызывай инструмент advance_beat.",
+  "К концу первого перехода между этапами что-то должно появиться на холсте — не оставляй холст пустым.",
   "Рисуй на холсте только через инструменты show_ten_frame, fill_frame, show_number_line, show_choice_cards и show_text.",
   "Когда ребёнок нажимает на холсте, считай это его ответом.",
   "Если ребёнок ошибся — помоги найти ошибку, не говори «неправильно».",
+  "В конце занятия подведи персональный итог: что у ребёнка получилось легко, что было трудным, и что ждёт его в следующий раз, — вместо шаблонной похвалы.",
 ].join("\n");
 
 /**
@@ -92,8 +96,12 @@ export function buildPackage(workspacePath: string): SessionPackage {
 
 /**
  * Newest lesson plan by filename (names are date-prefixed by convention:
- * `lesson-<yyyy-mm-dd>.md`). Lexicographic descending is deterministic and
- * does not depend on filesystem mtimes.
+ * `lesson-<yyyy-mm-dd>.md`, with a same-day collision suffix
+ * `lesson-<yyyy-mm-dd>-<hhmm>.md`). The date decides first; within one date a
+ * plain name is older than any suffixed revision. A plain lexicographic
+ * descending sort would rank `lesson-<date>.md` above
+ * `lesson-<date>-<hhmm>.md` (`.` sorts after `-`), so the date and suffix are
+ * compared separately. Does not depend on filesystem mtimes.
  */
 export function findNewestLesson(workspacePath: string): string | null {
   const plansDir = join(workspacePath, "plans");
@@ -102,8 +110,29 @@ export function findNewestLesson(workspacePath: string): string | null {
   }
   const matches = readdirSync(plansDir)
     .filter((name) => /^lesson-.*\.md$/.test(name))
-    .sort((a, b) => b.localeCompare(a));
+    .sort((a, b) => compareLessonNames(b, a));
   return matches.length > 0 ? `plans/${matches[0]}` : null;
+}
+
+/** Ascending order: date, then plain-before-suffixed, then the suffix text. */
+function compareLessonNames(a: string, b: string): number {
+  const left = splitLessonName(a);
+  const right = splitLessonName(b);
+  if (left.date !== right.date) {
+    return left.date < right.date ? -1 : 1;
+  }
+  if (left.suffix !== right.suffix) {
+    return left.suffix < right.suffix ? -1 : 1;
+  }
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+function splitLessonName(name: string): { date: string; suffix: string } {
+  const match = /^lesson-(\d{4}-\d{2}-\d{2})(.*)\.md$/.exec(name);
+  if (match === null) {
+    return { date: name, suffix: "" };
+  }
+  return { date: match[1], suffix: match[2] };
 }
 
 function isFile(absolutePath: string): boolean {

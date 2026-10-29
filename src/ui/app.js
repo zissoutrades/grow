@@ -6,6 +6,7 @@ import { createCanvasView } from "./canvas.js";
 import {
   applyCanvasEvent,
   applyTranscript,
+  clearChoiceSelection,
   formatClock,
   initialCanvasState,
   initialTranscriptState,
@@ -343,6 +344,10 @@ function handleEvent(message) {
       break;
     case "beat":
       state.beat = { beatId: String(message.beatId), outcome: String(message.outcome) };
+      // `advance_beat` is a question boundary: the old card highlight no
+      // longer answers the current question.
+      state.canvas = clearChoiceSelection(state.canvas);
+      canvasView.render(state.canvas);
       renderBeat();
       break;
     case "turn":
@@ -371,6 +376,7 @@ function handleSessionSaved(message) {
   }
   state.saved = true;
   state.closing = true;
+  const failed = message.reason === "no_child_response";
   stopClock();
   stopCapture();
   closeAudio();
@@ -381,13 +387,24 @@ function handleSessionSaved(message) {
     setAfterStatus("после сессии: идёт обработка…");
     startAfterPolling();
   }
-  setStatus("Сессия сохранена.", "ok");
+  if (failed) {
+    setStatus(
+      "Занятие не состоялось: ребёнок не ответил. Перезапустите, когда будете готовы.",
+      "error",
+    );
+  } else {
+    setStatus("Сессия сохранена.", "ok");
+  }
   console.info(`session saved: ${String(message.sessionId ?? state.sessionId ?? "")}`);
 }
 
 function handleAfter(message) {
   const status =
-    message.status === "done" || message.status === "error" ? message.status : "running";
+    message.status === "done" ||
+    message.status === "error" ||
+    message.status === "skipped"
+      ? message.status
+      : "running";
   const written = Array.isArray(message.written) ? message.written.map(String) : [];
 
   if (status === "running") {
@@ -399,6 +416,11 @@ function handleAfter(message) {
 
   state.afterFinal = true;
   stopAfterPolling();
+  if (status === "skipped") {
+    setAfterStatus("после сессии: пропущено — занятие не состоялось", true);
+    newSessionButton.disabled = false;
+    return;
+  }
   if (status === "done") {
     const suffix = written.length > 0 ? ` (${written.join(", ")})` : "";
     setAfterStatus(`после сессии: готово${suffix}`);
@@ -434,8 +456,16 @@ async function pollAfter() {
   state.pollAttempts += 1;
   try {
     const result = await state.client.getSessionStatus(state.sessionId);
-    if (!state.saved && (result.afterStatus === "done" || result.afterStatus === "error")) {
-      handleSessionSaved({ reason: "child_tap", sessionId: state.sessionId });
+    if (
+      !state.saved &&
+      (result.afterStatus === "done" ||
+        result.afterStatus === "error" ||
+        result.afterStatus === "skipped")
+    ) {
+      handleSessionSaved({
+        reason: result.reason ?? "child_tap",
+        sessionId: state.sessionId,
+      });
     }
     handleAfter({ status: result.afterStatus, written: result.written });
   } catch (error) {

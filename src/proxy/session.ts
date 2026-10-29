@@ -20,9 +20,17 @@ import {
 } from "./tools";
 import { MIC_FORMAT, TUTOR_FORMAT, stampPcmToWav, type WaveStampResult } from "./wav";
 
-export type FinalizeReason = "child_tap" | "parent_console" | "timeout" | "silence";
+export type FinalizeReason =
+  | "child_tap"
+  | "parent_console"
+  | "timeout"
+  | "silence"
+  | "no_child_response";
 
 export type SessionState = "created" | "starting" | "live" | "finalizing" | "done" | "error";
+
+/** Why a text turn was injected; recorded on the `inject` log line. */
+export type SessionInjectPhase = "manual" | "greeting" | "failsafe" | "close";
 
 export interface ClientSink {
   sendJson(payload: unknown): void;
@@ -33,15 +41,41 @@ export interface SessionDurations {
   closeInstructionMs: number;
   hardCapMs: number;
   silenceMs: number;
+  /** Wait after the greeting before the first "can you hear me?" retry. */
+  greetingGraceMs: number;
+  /** Wait between greeting retries and before the farewell. */
+  greetingRetryMs: number;
+  /** Time allowed for the farewell line to be spoken before finalizing. */
+  farewellGraceMs: number;
 }
 
 export const DEFAULT_DURATIONS: SessionDurations = {
   closeInstructionMs: 10 * 60 * 1000,
   hardCapMs: 12 * 60 * 1000,
   silenceMs: 3 * 60 * 1000,
+  greetingGraceMs: 5_000,
+  greetingRetryMs: 10_000,
+  farewellGraceMs: 5_000,
 };
 
 export const CLOSE_INSTRUCTION = "Приблизься к финальному биту: рефлексия и прощание.";
+
+/**
+ * Start failsafe (owner spec U10.1). The tutor greets first; if the child never
+ * answers, two retries lead to a graceful `no_child_response` close.
+ */
+export const GREETING_INSTRUCTION =
+  "Начни занятие сам, не жди, пока ребёнок заговорит: коротко поздоровайся по-русски и сразу переходи к первому биту урока.";
+
+export const GREETING_RETRY_INSTRUCTIONS = [
+  "Ребёнок пока не ответил. Коротко спроси по-русски: «Ты меня слышишь?»",
+  "Ребёнок всё ещё не отвечает. Ещё раз коротко спроси по-русски: «Ты меня слышишь?»",
+] as const;
+
+export const NO_RESPONSE_FAREWELL =
+  "Скажи ребёнку по-русски: «Кажется, ты меня не слышишь. Завершаю занятие — перезапусти, когда будешь готов(а).»";
+
+const GREETING_MAX_RETRIES = GREETING_RETRY_INSTRUCTIONS.length;
 
 const TOKENS_PER_AUDIO_SECOND = 25;
 const RATES_USD_PER_MILLION = {
@@ -67,11 +101,18 @@ export interface TimerHandlers {
   onCloseInstruction(): void;
   onHardCap(): void;
   onSilence(): void;
+  /** 1-based greeting retry: 1 = first "Ты меня слышишь?", 2 = the second. */
+  onGreetingRetry(attempt: number): void;
+  /** No child response at all: inject the farewell line. */
+  onNoChildResponse(): void;
+  /** The farewell has had its grace period: finalize `no_child_response`. */
+  onNoChildResponseFinalize(): void;
 }
 
 /**
- * Session clock: 10:00 close instruction, 12:00 hard cap, and an idle timer
- * (3 min with no model/child activity) armed after the close instruction.
+ * Session clock: 10:00 close instruction, 12:00 hard cap, an idle timer
+ * (3 min with no model/child activity) armed after the close instruction, and
+ * the start failsafe ladder armed after the tutor's opening greeting.
  */
 export class SessionTimers {
   private readonly clock: Clock;
@@ -80,6 +121,10 @@ export class SessionTimers {
   private closeInstructionHandle: unknown = null;
   private hardCapHandle: unknown = null;
   private silenceHandle: unknown = null;
+  private greetingHandle: unknown = null;
+  private greetingArmed = false;
+  private greetingAttempt = 0;
+  private farewellIssued = false;
   private instructionSent = false;
   private disposed = false;
 
@@ -115,6 +160,29 @@ export class SessionTimers {
     this.armSilence();
   }
 
+  /**
+   * Arm the start failsafe after the tutor's greeting: 5 s of child silence →
+   * "Ты меня слышишь?", 10 s more → one more retry, 10 s more → farewell, and
+   * after the farewell grace period the session finalizes.
+   */
+  armGreetingWatchdog(): void {
+    if (this.disposed || this.greetingArmed || this.farewellIssued) {
+      return;
+    }
+    this.greetingArmed = true;
+    this.greetingAttempt = 0;
+    this.scheduleGreeting(this.durations.greetingGraceMs);
+  }
+
+  /** First child response: stop the ladder. A farewell already spoken is final. */
+  disarmGreetingWatchdog(): void {
+    if (this.farewellIssued) {
+      return;
+    }
+    this.greetingArmed = false;
+    this.clearGreeting();
+  }
+
   dispose(): void {
     if (this.disposed) {
       return;
@@ -129,6 +197,51 @@ export class SessionTimers {
       this.closeInstructionHandle = null;
     }
     this.clearSilence();
+    this.clearGreeting();
+    this.greetingArmed = false;
+  }
+
+  private scheduleGreeting(delayMs: number): void {
+    this.clearGreeting();
+    this.greetingHandle = this.clock.setTimeout(() => {
+      this.greetingHandle = null;
+      this.onGreetingTimer();
+    }, delayMs);
+  }
+
+  private onGreetingTimer(): void {
+    if (this.disposed || !this.greetingArmed || this.farewellIssued) {
+      return;
+    }
+    this.greetingAttempt += 1;
+    if (this.greetingAttempt <= GREETING_MAX_RETRIES) {
+      this.handlers.onGreetingRetry(this.greetingAttempt);
+      this.scheduleGreeting(this.durations.greetingRetryMs);
+      return;
+    }
+
+    // Ladder exhausted: the tutor says goodbye, then the session ends.
+    this.greetingArmed = false;
+    this.farewellIssued = true;
+    this.handlers.onNoChildResponse();
+    this.scheduleFarewellFinalize();
+  }
+
+  private scheduleFarewellFinalize(): void {
+    this.clearGreeting();
+    this.greetingHandle = this.clock.setTimeout(() => {
+      this.greetingHandle = null;
+      if (!this.disposed) {
+        this.handlers.onNoChildResponseFinalize();
+      }
+    }, this.durations.farewellGraceMs);
+  }
+
+  private clearGreeting(): void {
+    if (this.greetingHandle !== null) {
+      this.clock.clearTimeout(this.greetingHandle);
+      this.greetingHandle = null;
+    }
   }
 
   private armSilence(): void {
@@ -255,6 +368,8 @@ export class Session {
   private timers: SessionTimers | null = null;
   private client: ClientSink | null = null;
   private finalizePromise: Promise<FinalizeOutcome> | null = null;
+  private greetingSent = false;
+  private endReason: FinalizeReason | null = null;
 
   private startedAtMs = 0;
   private micBytes = 0;
@@ -331,14 +446,23 @@ export class Session {
       onSilence: () => {
         void this.finalize("silence");
       },
+      onGreetingRetry: (attempt) => this.injectGreetingRetry(attempt),
+      onNoChildResponse: () => this.injectNoResponseFarewell(),
+      onNoChildResponseFinalize: () => {
+        void this.finalize("no_child_response");
+      },
     });
     this.timers.start();
+    // Tests attach a client before start; the proxy attaches the WS right after
+    // /api/start resolves. Whichever happens last triggers the greeting.
+    this.maybeGreet();
 
     return { sessionId: this.log.sessionId, files: this.pkg.files };
   }
 
   attachClient(client: ClientSink): void {
     this.client = client;
+    this.maybeGreet();
   }
 
   detachClient(): void {
@@ -370,6 +494,7 @@ export class Session {
     this.log.append("child_action", { action: action.kind, value: action.value, text });
     try {
       this.gemini.sendText(text);
+      this.timers?.disarmGreetingWatchdog();
       this.timers?.notifyActivity();
     } catch (error) {
       const message = errorMessage(error);
@@ -387,25 +512,30 @@ export class Session {
   }
 
   /** Inject one text turn upstream (also used by scripts/probe-file.ts). */
-  sendTextTurn(text: string): void {
+  sendTextTurn(text: string, phase: SessionInjectPhase = "manual"): void {
     if (this.state !== "live" || this.log === null || this.gemini === null) {
       throw new SessionError(`cannot inject text in state ${this.state}`);
     }
     this.gemini.sendText(text);
-    this.log.append("inject", { text });
+    this.log.append("inject", { text, phase });
     this.timers?.notifyActivity();
   }
 
   /** Idempotent finalize; every path runs the same end sequence. */
   finalize(reason: FinalizeReason): Promise<string> {
     if (this.finalizePromise === null) {
+      this.endReason = reason;
       this.finalizePromise = this.doFinalize(reason).then((outcome) => outcome.folder);
     }
     return this.finalizePromise;
   }
 
-  getStatus(): { afterStatus: AfterStatus; written: readonly string[] } {
-    return { afterStatus: this.afterStatus, written: this.written };
+  getStatus(): {
+    afterStatus: AfterStatus;
+    written: readonly string[];
+    reason: FinalizeReason | null;
+  } {
+    return { afterStatus: this.afterStatus, written: this.written, reason: this.endReason };
   }
 
   snapshot(): SessionSnapshot {
@@ -493,6 +623,11 @@ export class Session {
     }
     this.log.append("transcript", { role, text, partial });
     this.client?.sendJson({ type: "transcript", role, text, partial });
+    if (role === "child") {
+      // The child is there: stop the start-failsafe ladder on the first sign of
+      // speech (interim or final). Raw mic frames are continuous and do not count.
+      this.timers?.disarmGreetingWatchdog();
+    }
     if (!partial) {
       this.timers?.notifyActivity();
     }
@@ -639,11 +774,56 @@ export class Session {
       return;
     }
     try {
-      this.sendTextTurn(CLOSE_INSTRUCTION);
+      this.sendTextTurn(CLOSE_INSTRUCTION, "close");
       this.client?.sendJson({ type: "inject", text: CLOSE_INSTRUCTION });
     } catch (error) {
       const message = errorMessage(error);
       this.log.append("turn_event", { event: "error", phase: "inject", message });
+      this.sendError(message);
+    }
+  }
+
+  /** Once, right after setup and once a client can actually hear the audio. */
+  private maybeGreet(): void {
+    if (
+      this.greetingSent ||
+      this.state !== "live" ||
+      this.client === null ||
+      this.log === null ||
+      this.gemini === null
+    ) {
+      return;
+    }
+    this.greetingSent = true;
+    try {
+      this.sendTextTurn(GREETING_INSTRUCTION, "greeting");
+      this.timers?.armGreetingWatchdog();
+    } catch (error) {
+      const message = errorMessage(error);
+      this.log.append("turn_event", { event: "error", phase: "greeting", message });
+      this.sendError(message);
+    }
+  }
+
+  private injectGreetingRetry(attempt: number): void {
+    const text =
+      GREETING_RETRY_INSTRUCTIONS[attempt - 1] ?? GREETING_RETRY_INSTRUCTIONS[0];
+    this.injectFailsafe(text);
+  }
+
+  private injectNoResponseFarewell(): void {
+    this.injectFailsafe(NO_RESPONSE_FAREWELL);
+  }
+
+  private injectFailsafe(text: string): void {
+    if (this.state !== "live" || this.log === null || this.gemini === null) {
+      return;
+    }
+    try {
+      this.sendTextTurn(text, "failsafe");
+    } catch (error) {
+      const message = errorMessage(error);
+      this.log.append("turn_event", { event: "error", phase: "failsafe", message });
       this.sendError(message);
     }
   }
@@ -709,6 +889,22 @@ export class Session {
 
     this.state = "done";
     this.client?.sendJson({ type: "session_saved", reason, sessionId: log.sessionId });
+
+    if (reason === "no_child_response") {
+      // Nothing to reflect on: a session that never got going produces no
+      // diary, report or plan revision. Record the skip and finish.
+      this.afterStatus = "skipped";
+      this.written = [];
+      log.append("after", { status: "skipped", written: [], reason });
+      log.close();
+      this.client?.sendJson({ type: "after", status: "skipped", written: [] });
+      return {
+        folder: log.folder,
+        afterStatus: this.afterStatus,
+        written: this.written,
+      };
+    }
+
     this.client?.sendJson({ type: "after", status: "running", written: [] });
 
     try {

@@ -3,6 +3,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -11,6 +12,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   CLOSE_INSTRUCTION,
+  GREETING_INSTRUCTION,
+  GREETING_RETRY_INSTRUCTIONS,
+  NO_RESPONSE_FAREWELL,
   Session,
   type ClientSink,
   type SessionGemini,
@@ -72,15 +76,24 @@ interface Harness {
     json: Array<Record<string, unknown>>;
   };
   clock: FakeClock;
+  workspacePath: string;
 }
 
 async function startSession(
-  durations: Partial<{ closeInstructionMs: number; hardCapMs: number; silenceMs: number }> = {},
+  durations: Partial<{
+    closeInstructionMs: number;
+    hardCapMs: number;
+    silenceMs: number;
+    greetingGraceMs: number;
+    greetingRetryMs: number;
+    farewellGraceMs: number;
+  }> = {},
 ): Promise<Harness> {
   const clock = new FakeClock();
   let gemini: FakeGemini | null = null;
+  const workspacePath = workspace();
   const session = new Session({
-    workspacePath: workspace(),
+    workspacePath,
     apiKey: "test-key",
     clock,
     durations,
@@ -111,7 +124,7 @@ async function startSession(
   if (gemini === null) {
     throw new Error("fake gemini was not created");
   }
-  return { session, gemini, sink, clock };
+  return { session, gemini, sink, clock, workspacePath };
 }
 
 afterEach(() => {
@@ -121,6 +134,98 @@ afterEach(() => {
 });
 
 describe("Session", () => {
+  test("greets first after setup instead of waiting for the child", async () => {
+    const { session, gemini } = await startSession();
+
+    expect(gemini.sentTexts[0]).toBe(GREETING_INSTRUCTION);
+
+    const folder = await session.finalize("child_tap");
+    const records = readJournal(join(folder, "session.jsonl"));
+    const greeting = records.find(
+      (record) => record.kind === "inject" && record.phase === "greeting",
+    );
+    expect(greeting?.text).toBe(GREETING_INSTRUCTION);
+  });
+
+  test("greets only once when the client attaches again", async () => {
+    const { session, gemini } = await startSession();
+    const client: ClientSink = { sendBinary: () => {}, sendJson: () => {} };
+
+    session.attachClient(client);
+
+    expect(gemini.sentTexts).toEqual([GREETING_INSTRUCTION]);
+    await session.finalize("child_tap");
+  });
+
+  test("walks the no-response failsafe and skips the after-loop", async () => {
+    const { session, gemini, clock, sink, workspacePath } = await startSession({
+      closeInstructionMs: 100_000,
+      hardCapMs: 100_000,
+      silenceMs: 100_000,
+      greetingGraceMs: 1_000,
+      greetingRetryMs: 1_000,
+      farewellGraceMs: 500,
+    });
+    expect(gemini.sentTexts).toEqual([GREETING_INSTRUCTION]);
+
+    clock.advance(1_000);
+    expect(gemini.sentTexts).toContain(GREETING_RETRY_INSTRUCTIONS[0]);
+
+    clock.advance(1_000);
+    expect(gemini.sentTexts).toContain(GREETING_RETRY_INSTRUCTIONS[1]);
+
+    clock.advance(1_000);
+    expect(gemini.sentTexts).toContain(NO_RESPONSE_FAREWELL);
+    expect(session.currentState).toBe("live");
+
+    clock.advance(500);
+    const folder = await session.finalize("no_child_response");
+
+    expect(session.currentState).toBe("done");
+    expect(session.getStatus()).toEqual({
+      afterStatus: "skipped",
+      written: [],
+      reason: "no_child_response",
+    });
+
+    const records = readJournal(join(folder, "session.jsonl"));
+    const end = records.find((record) => record.kind === "session_end");
+    expect(end?.reason).toBe("no_child_response");
+    const after = records.find((record) => record.kind === "after");
+    expect(after?.status).toBe("skipped");
+    expect(after?.written).toEqual([]);
+
+    expect(existsSync(join(folder, "mic.wav"))).toBe(true);
+    expect(existsSync(join(folder, "tutor.wav"))).toBe(true);
+    expect(sink.json.some((message) => message.type === "session_saved")).toBe(true);
+    expect(
+      sink.json.some((message) => message.type === "after" && message.status === "skipped"),
+    ).toBe(true);
+
+    // Nothing to reflect on: no diary, report or revised plan.
+    expect(readdirSync(join(workspacePath, "plans"))).toEqual(["lesson-2026-10-30.md"]);
+    expect(existsSync(join(workspacePath, "reports"))).toBe(false);
+    expect(existsSync(join(workspacePath, "memory/diary"))).toBe(false);
+  });
+
+  test("the first child transcript disarms the start failsafe", async () => {
+    const { session, gemini, clock } = await startSession({
+      closeInstructionMs: 100_000,
+      hardCapMs: 100_000,
+      silenceMs: 100_000,
+      greetingGraceMs: 1_000,
+      greetingRetryMs: 1_000,
+      farewellGraceMs: 500,
+    });
+
+    gemini.callbacks.onTranscript("child", "Привет", false);
+    clock.advance(60_000);
+
+    expect(gemini.sentTexts).toEqual([GREETING_INSTRUCTION]);
+    expect(session.currentState).toBe("live");
+    await session.finalize("child_tap");
+  });
+
   test("relays audio, logs records, and stamps WAVs at finalize", async () => {
     const { session, gemini, sink } = await startSession();
     const sessionId = session.sessionId;

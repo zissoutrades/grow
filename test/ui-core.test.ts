@@ -5,12 +5,14 @@ import {
   MAX_TEXT_BLOCKS,
   applyCanvasEvent,
   applyTranscript,
+  clearChoiceSelection,
   floatToInt16,
   formatClock,
   frameInt16,
   initialCanvasState,
   initialTranscriptState,
   int16ToFloat32,
+  numberLineTicks,
   selectChoice,
   tapTenFrame,
 } from "../src/ui/core.js";
@@ -178,6 +180,15 @@ describe("canvas routing", () => {
     expect(state.numberline).toEqual({ min: 0, max: 20, marker: null });
   });
 
+  test("numberLineTicks labels every integer on a short range", () => {
+    expect(numberLineTicks(1, 10)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+  });
+
+  test("numberLineTicks stays integral and sparse on a long range", () => {
+    expect(numberLineTicks(0, 20)).toEqual([0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20]);
+    expect(numberLineTicks(1.2, 9.8)).toEqual([2, 3, 4, 5, 6, 7, 8, 9]);
+  });
+
   test("show_choice_cards replaces the previous cards", () => {
     let state = applyCanvasEvent(initialCanvasState(), {
       tool: "show_choice_cards",
@@ -256,5 +267,44 @@ describe("canvas routing", () => {
     const selected = selectChoice(state, "b");
     expect(selected.choices?.selectedId).toBe("b");
     expect(selectChoice(selected, "zzz")).toBe(selected);
+  });
+
+  test("any canvas event clears the active card highlight", () => {
+    const cards = [
+      { id: "a", label: "да" },
+      { id: "b", label: "нет" },
+    ];
+    const state = applyCanvasEvent(initialCanvasState(), {
+      tool: "show_choice_cards",
+      args: { cards },
+    });
+    const selected = selectChoice(state, "b");
+    const events = [
+      { tool: "show_ten_frame", args: { filled: 2 } },
+      { tool: "fill_frame", args: { index: 3 } },
+      { tool: "show_number_line", args: { min: 0, max: 10, marker: 4 } },
+      { tool: "show_choice_cards", args: { cards } },
+      { tool: "show_text", args: { text: "Следующий вопрос" } },
+    ];
+    for (const event of events) {
+      expect(applyCanvasEvent(selected, event).choices?.selectedId).toBeNull();
+    }
+  });
+
+  test("clearChoiceSelection drops the highlight and keeps the cards", () => {
+    const state = applyCanvasEvent(initialCanvasState(), {
+      tool: "show_choice_cards",
+      args: {
+        cards: [
+          { id: "a", label: "да" },
+          { id: "b", label: "нет" },
+        ],
+      },
+    });
+    const selected = selectChoice(state, "a");
+    const cleared = clearChoiceSelection(selected);
+    expect(cleared.choices).toEqual({ cards: selected.choices?.cards, selectedId: null });
+    expect(selectChoice(cleared, "b").choices?.selectedId).toBe("b");
+    expect(clearChoiceSelection(cleared)).toBe(cleared);
   });
 });

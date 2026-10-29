@@ -135,6 +135,26 @@ export function applyTranscript(state, message) {
 
 // --- Canvas ---------------------------------------------------------------
 
+/**
+ * Label positions for the number line: integer values only. Short ranges get
+ * every integer; longer ranges get an integer step so at most `maxLabels + 1`
+ * labels are drawn (never a midpoint decimal such as 5.5).
+ */
+export function numberLineTicks(min, max, maxLabels = 10) {
+  const first = Math.ceil(min);
+  const last = Math.floor(max);
+  if (!Number.isFinite(first) || !Number.isFinite(last) || last < first) {
+    return [];
+  }
+  const step = Math.max(1, Math.ceil((last - first) / maxLabels));
+  const start = Math.ceil(first / step) * step;
+  const ticks = [];
+  for (let value = start; value <= last; value += step) {
+    ticks.push(value);
+  }
+  return ticks;
+}
+
 export function initialCanvasState() {
   return {
     tenframe: null,
@@ -158,8 +178,21 @@ function filledCells(count) {
 }
 
 /**
+ * Drop the active card highlight. The highlight means "the answer chosen for
+ * the current question", so question boundaries (a new canvas render or an
+ * `advance_beat`) clear it; cards and their order stay untouched.
+ */
+export function clearChoiceSelection(state) {
+  if (state.choices === null || state.choices.selectedId === null) {
+    return state;
+  }
+  return { ...state, choices: { ...state.choices, selectedId: null } };
+}
+
+/**
  * Apply one PROTOCOL §2 canvas event. Widget tools replace their widget;
- * `show_text` appends to a rolling text area.
+ * `show_text` appends to a rolling text area. Every applied canvas event is a
+ * new question surface, so it clears the previous question's card highlight.
  */
 export function applyCanvasEvent(state, message) {
   if (!isRecord(message) || !isRecord(message.args)) {
@@ -173,10 +206,10 @@ export function applyCanvasEvent(state, message) {
       if (filled === null) {
         return state;
       }
-      return {
+      return clearChoiceSelection({
         ...state,
         tenframe: { cells: filledCells(clamp(Math.round(filled), 0, 10)) },
-      };
+      });
     }
     case "fill_frame": {
       const index = finiteNumber(args.index);
@@ -185,7 +218,7 @@ export function applyCanvasEvent(state, message) {
       }
       const cells = state.tenframe === null ? emptyCells() : [...state.tenframe.cells];
       cells[Math.round(index)] = true;
-      return { ...state, tenframe: { cells } };
+      return clearChoiceSelection({ ...state, tenframe: { cells } });
     }
     case "show_number_line": {
       const min = finiteNumber(args.min);
@@ -194,7 +227,7 @@ export function applyCanvasEvent(state, message) {
       if (min === null || max === null || min === max) {
         return state;
       }
-      return { ...state, numberline: { min, max, marker } };
+      return clearChoiceSelection({ ...state, numberline: { min, max, marker } });
     }
     case "show_choice_cards": {
       if (!Array.isArray(args.cards)) {
@@ -207,18 +240,18 @@ export function applyCanvasEvent(state, message) {
       if (cards.length < 2) {
         return state;
       }
-      return { ...state, choices: { cards, selectedId: null } };
+      return clearChoiceSelection({ ...state, choices: { cards, selectedId: null } });
     }
     case "show_text": {
       if (typeof args.text !== "string") {
         return state;
       }
       const entry = { id: state.nextTextId, text: args.text };
-      return {
+      return clearChoiceSelection({
         ...state,
         texts: [...state.texts, entry].slice(-MAX_TEXT_BLOCKS),
         nextTextId: state.nextTextId + 1,
-      };
+      });
     }
     default:
       return state;

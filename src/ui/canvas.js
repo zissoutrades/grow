@@ -1,9 +1,13 @@
 // Canvas rendering. Pure state lives in core.js; this module only turns state
 // into DOM and reports taps back to app.js.
-import { MAX_TEXT_BLOCKS } from "./core.js";
+import { MAX_TEXT_BLOCKS, numberLineTicks } from "./core.js";
 
 function formatNumber(value) {
   return Number.isInteger(value) ? String(value) : String(Math.round(value * 10) / 10);
+}
+
+function integerLabel(value) {
+  return Number.isInteger(value) ? String(value) : "";
 }
 
 /**
@@ -67,16 +71,15 @@ export function createCanvasView({
     axis.className = "numberline-axis";
     numberline.appendChild(axis);
 
-    const ticks = [
-      { value: min, position: 0 },
-      { value: (min + max) / 2, position: 50 },
-      { value: max, position: 100 },
-    ];
+    const ticks = numberLineTicks(min, max).map((value) => ({
+      value,
+      position: ((value - min) / (max - min)) * 100,
+    }));
     for (const tick of ticks) {
       const tickEl = document.createElement("span");
       tickEl.className = "numberline-tick";
       tickEl.style.left = `${tick.position}%`;
-      tickEl.textContent = formatNumber(tick.value);
+      tickEl.textContent = integerLabel(tick.value);
       numberline.appendChild(tickEl);
     }
 
@@ -86,7 +89,7 @@ export function createCanvasView({
       const markerEl = document.createElement("span");
       markerEl.className = "numberline-marker";
       markerEl.style.left = `${position}%`;
-      markerEl.textContent = formatNumber(marker);
+      markerEl.textContent = integerLabel(marker);
       numberline.appendChild(markerEl);
     }
   }

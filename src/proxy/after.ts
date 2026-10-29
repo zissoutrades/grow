@@ -23,7 +23,7 @@ import { generateText, type TextModelFn } from "./text-model";
  * finalize path cannot crash.
  */
 
-export type AfterStatus = "running" | "done" | "error";
+export type AfterStatus = "running" | "done" | "error" | "skipped";
 
 export interface AfterContext {
   readonly sessionId: string;
@@ -72,7 +72,7 @@ const SYSTEM_PROMPT = [
   'Схема: {"diary": "…", "report": "…", "planRevision": "…"}',
   "diary — короткая тёплая запись для родителя, 3–5 предложений: как прошло занятие, что получилось.",
   "report — разбор для родителя: что происходило, какие были сигналы (успехи, трудности, ошибки), что это значит для следующих занятий.",
-  "planRevision — полный план следующего занятия в том же формате, что файл plans/lesson-*.md: заголовок с датой, нумерованные шаги по битам (recall, present, attempt, diagnose, repair, extend, consolidate, reflect, close).",
+  "planRevision — полный план следующего занятия в том же формате, что файл plans/lesson-*.md: заголовок с датой, нумерованные шаги по битам (recall, present, attempt, diagnose, repair, consolidate, reflect, close).",
   "Опирайся только на стенограмму и файлы; не выдумывай фактов. Никаких пояснений вокруг JSON.",
 ].join("\n");
 
@@ -198,8 +198,10 @@ export function parseAfterResponse(raw: string): AfterPayload {
  *
  * PROTOCOL §7 same-day naming: the plain date name is used when it is free;
  * otherwise the session time is inserted (`<date>-<hhmm>.md`,
- * `reports/<date>-<hhmm>-report.md`). `exists` is injected so the naming rule
- * is a pure function over a temp folder in tests.
+ * `reports/<date>-<hhmm>-report.md`, `plans/lesson-<date>-<hhmm>.md`). The
+ * plan can collide with a console `revise_plan`, so it follows the same rule.
+ * `exists` is injected so the naming rule is a pure function over a temp
+ * folder in tests.
  */
 export function afterFiles(
   sessionDate: string,
@@ -218,12 +220,16 @@ export function afterFiles(
       `reports/${sessionDate}-${sessionTime}-report.md`,
       exists,
     ),
-    plan: `plans/lesson-${nextLessonDate}.md`,
+    plan: firstFreePath(
+      `plans/lesson-${nextLessonDate}.md`,
+      `plans/lesson-${nextLessonDate}-${sessionTime}.md`,
+      exists,
+    ),
   };
 }
 
 /** Prefer `base`; if taken, `suffixed`; then `-b`, `-c`, … (never overwrite). */
-function firstFreePath(
+export function firstFreePath(
   base: string,
   suffixed: string,
   exists: (relativePath: string) => boolean,
@@ -254,7 +260,10 @@ export function nextLessonDateFor(
   now: () => Date = () => new Date(),
 ): string {
   const newest = findNewestLesson(workspacePath);
-  const match = newest === null ? null : /lesson-(\d{4}-\d{2}-\d{2})\.md$/.exec(newest);
+  // Same-day revisions carry a time suffix (`lesson-<date>-<hhmm>.md`), so the
+  // date is not necessarily followed directly by `.md`.
+  const match =
+    newest === null ? null : /lesson-(\d{4}-\d{2}-\d{2})(?:-[^/]+)?\.md$/.exec(newest);
   const newestDate = match === null ? null : match[1];
   if (newestDate === null) {
     return formatLocalDate(now());
@@ -425,6 +434,12 @@ function sessionDateFor(context: AfterContext, now: () => Date): string {
   return formatLocalDate(now());
 }
 
+/** `hhmm` local time, the same-day artefact suffix shared with the console. */
+export function formatTimeSuffix(date: Date): string {
+  const pad = (value: number): string => String(value).padStart(2, "0");
+  return `${pad(date.getHours())}${pad(date.getMinutes())}`;
+}
+
 /** `hhmm` from the session stamp (the folder name), else the injected clock. */
 function sessionTimeFor(context: AfterContext, now: () => Date): string {
   const match =
@@ -433,9 +448,7 @@ function sessionTimeFor(context: AfterContext, now: () => Date): string {
   if (match !== null) {
     return `${match[1]}${match[2]}`;
   }
-  const date = now();
-  const pad = (value: number): string => String(value).padStart(2, "0");
-  return `${pad(date.getHours())}${pad(date.getMinutes())}`;
+  return formatTimeSuffix(now());
 }
 
 function addDays(date: string, days: number): string {

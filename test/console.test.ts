@@ -274,10 +274,76 @@ describe("manager chat loop", () => {
     expect(readFileSync(join(folder, "plans/lesson-2026-10-28.md"), "utf8")).toContain(
       "Повторить состав 10",
     );
+    // The diff baseline is the revised plan, not the (new, empty) target file.
+    const diff = (result.actions[0].result as { diff: string }).diff;
+    expect(diff).toContain("-# План 27");
+    expect(diff).toContain("-1. Повторить 10.");
+    expect(diff).toContain("+# План 28");
+    expect(diff).toContain("+1. Повторить состав 10.");
     // The revision call is the second model call and sees the session journal.
     expect(fake.calls[1].system).toContain("методист");
     expect(fake.calls[1].prompt).toContain("Журнал сессии");
     expect(fake.calls[1].prompt).toContain("ребёнок справился");
+  });
+
+  test("revise_plan does not clobber a plan the after-loop already wrote for the same date", async () => {
+    const folder = workspace();
+    const afterLoopPlan = "# План 28 от после-цикла\n\n1. Шаг после занятия.\n";
+    const calls: FakeCall[] = [];
+    const responses = [
+      '{"tool":"revise_plan","args":{}}',
+      "# План 28 из консоли\n\n1. Шаг из консоли.\n",
+      "План обновлён.",
+    ];
+    const generate = async (prompt: string, system?: string): Promise<string> => {
+      calls.push({ prompt, system });
+      const next = responses.shift();
+      if (next === undefined) {
+        throw new Error("fake text model ran out of responses");
+      }
+      // The second call is the revision itself; the after-loop writes its plan
+      // for the same date before the console's own write lands.
+      if (calls.length === 2) {
+        writeFileSync(join(folder, "plans/lesson-2026-10-28.md"), afterLoopPlan, "utf8");
+      }
+      return next;
+    };
+
+    const result = await consoleChat("Пересмотри план", {
+      workspacePath: folder,
+      generateText: generate,
+      now: () => new Date(2026, 9, 28, 14, 5),
+    });
+
+    expect((result.actions[0].result as { path: string }).path).toBe(
+      "plans/lesson-2026-10-28-1405.md",
+    );
+    // The after-loop's plan survives; the console revision gets a time suffix.
+    expect(readFileSync(join(folder, "plans/lesson-2026-10-28.md"), "utf8")).toBe(
+      afterLoopPlan,
+    );
+    expect(
+      readFileSync(join(folder, "plans/lesson-2026-10-28-1405.md"), "utf8"),
+    ).toContain("Шаг из консоли");
+  });
+
+  test("revise_plan prompt carries the parent's current chat request", async () => {
+    const folder = workspace();
+    const request =
+      "добавим еще одну сложную карточку, чтобы посчитать двойками до 10: 2, 4, 6, 8, 10";
+    const fake = scripted([
+      '{"tool":"revise_plan","args":{}}',
+      "# План с двойками\n\n1. Считать двойками.\n",
+      "План обновлён.",
+    ]);
+
+    await consoleChat(request, {
+      workspacePath: folder,
+      generateText: fake.generate,
+    });
+
+    expect(fake.calls[1].prompt).toContain(`Запрос родителя из чата: ${request}`);
+    expect(fake.calls[1].prompt).toContain("обязательно отрази его в плане");
   });
 });
 
