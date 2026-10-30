@@ -1,6 +1,6 @@
 // Grow session client. Wires the proxy client, microphone capture, tutor
 // playback, canvas widgets and the three screens together. All protocol
-// shapes come from docs/agent/PROTOCOL.md §2.
+// shapes follow PROTOCOL.md §2 (agent harness repo, private).
 import { createProxyClient } from "./proxy-client.js";
 import { createCanvasView } from "./canvas.js";
 import {

@@ -62,7 +62,7 @@ interface SetupWaiter {
 
 /**
  * Upstream Gemini Live WebSocket. Envelope field names follow the Live API
- * reference verified 2026-10-28 (see `docs/agent/reports`).
+ * reference verified 2026-10-28.
  *
  * The class owns resumption: the latest `sessionResumptionUpdate.newHandle`
  * is stored, and an unexpected close after setup is retried with that handle.

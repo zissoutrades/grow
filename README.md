@@ -19,7 +19,8 @@ Requires [Bun](https://bun.sh). No dependencies, no database, no server beyond t
 - `src/ui/` — the browser client (child session at `/`, parent console at `/console`); static ES modules, no build step
 - `scripts/` — probes, mock proxy, `compile.sh` (single self-contained executable)
 - `test/` — bun tests (147 passing)
-- `docs/agent/` — coding conventions, protocol contract, status
+
+Agent coordination docs (coding conventions, protocol contract, build status and reports) live in a private harness repo, not in this public distribution.
 
 ## Workspace format
 
