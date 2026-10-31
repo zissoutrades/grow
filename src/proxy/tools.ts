@@ -6,6 +6,7 @@ export const BEAT_IDS = [
   "attempt",
   "diagnose",
   "repair",
+  "extend",
   "consolidate",
   "reflect",
   "close",

@@ -6,16 +6,25 @@
     <title>Grow — консоль родителя</title>
     <link rel="stylesheet" href="/console/style.css" />
     <style>
+      .topbar {
+        padding: 10px 28px 6px;
+      }
+
+      .status {
+        padding: 2px 28px 8px;
+        min-height: 0;
+      }
+
       .console-toolbar {
         display: flex;
         align-items: flex-end;
         gap: 12px;
         flex-wrap: wrap;
         margin-bottom: 18px;
-        padding: 16px 18px;
+        padding: 12px 14px;
         background: var(--panel);
         border: 1px solid var(--border);
-        border-radius: 14px;
+        border-radius: 8px;
       }
 
       .console-toolbar .field-label {
@@ -32,18 +41,60 @@
         flex: 0 0 auto;
       }
 
+      .console-recents {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex: 0 0 360px;
+        min-width: 0;
+      }
+
+      .console-workspace-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .console-workspace-row .path-input {
+        flex: 1 1 auto;
+        min-width: 0;
+      }
+
+      .console-recent-label {
+        flex: 0 0 auto;
+        font-size: 13px;
+        color: var(--muted);
+      }
+
+      .console-recent-select {
+        flex: 1 1 auto;
+        min-width: 0;
+        padding: 8px 10px;
+        border-radius: 6px;
+        border: 1px solid var(--border);
+        background: #101822;
+        color: var(--text);
+        font: inherit;
+        font-size: 14px;
+      }
+
+      .console-recent-select:focus {
+        outline: 2px solid var(--accent);
+        outline-offset: 1px;
+      }
+
       .console-grid {
         display: grid;
         grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr) minmax(0, 0.9fr);
-        gap: 18px;
+        gap: 12px;
         align-items: start;
       }
 
       .console-panel {
         background: var(--panel);
         border: 1px solid var(--border);
-        border-radius: 18px;
-        padding: 20px;
+        border-radius: 8px;
+        padding: 14px;
         min-width: 0;
       }
 
@@ -59,13 +110,12 @@
       .console-chat {
         display: flex;
         flex-direction: column;
-        min-height: 560px;
       }
 
       .chat-log {
         flex: 1 1 auto;
-        height: calc(100vh - 330px);
-        min-height: 300px;
+        height: calc(100vh - 440px);
+        min-height: 230px;
         overflow-y: auto;
         padding-right: 6px;
         margin-bottom: 14px;
@@ -73,8 +123,8 @@
 
       .chat-message {
         margin: 0 0 14px;
-        padding: 12px 14px;
-        border-radius: 12px;
+        padding: 10px 12px;
+        border-radius: 8px;
         border: 1px solid var(--border);
         background: var(--panel-2);
         font-size: 15px;
@@ -133,7 +183,7 @@
       .config-editor {
         width: 100%;
         padding: 12px 14px;
-        border-radius: 10px;
+        border-radius: 6px;
         border: 1px solid var(--border);
         background: #101822;
         color: var(--text);
@@ -152,6 +202,7 @@
       .chat-send {
         margin-top: 0;
         padding: 12px 18px;
+        border-radius: 8px;
         font-size: 16px;
       }
 
@@ -166,7 +217,7 @@
       .small-button {
         padding: 8px 12px;
         border: 1px solid var(--border);
-        border-radius: 9px;
+        border-radius: 6px;
         background: var(--panel-2);
         color: var(--text);
         font: inherit;
@@ -239,10 +290,10 @@
 
       .diff-view,
       .md-view {
-        height: calc(100vh - 300px);
+        height: calc(100vh - 360px);
         min-height: 300px;
         overflow: auto;
-        border-radius: 10px;
+        border-radius: 6px;
         background: #0c141e;
         border: 1px solid var(--border);
         padding: 14px;
@@ -358,6 +409,14 @@
           min-height: 0;
         }
 
+        .console-workspace-row {
+          flex-wrap: wrap;
+        }
+
+        .console-recents {
+          flex: 1 1 100%;
+        }
+
         .chat-log {
           height: 38vh;
           min-height: 220px;
@@ -373,6 +432,7 @@
     <header class="topbar">
       <div class="brand">Grow · консоль родителя</div>
       <div class="console-head-actions">
+        <a class="small-button" href="/" style="text-decoration: none;">Занятие</a>
         <button id="close-session-button" class="close-button console-close" type="button" hidden>
           Завершить занятие
         </button>
@@ -385,14 +445,24 @@
       <section class="console-toolbar" aria-label="Папка занятия">
         <div style="flex: 1 1 360px">
           <label class="field-label" for="workspace-input">Папка занятия</label>
-          <input
-            id="workspace-input"
-            class="path-input"
-            type="text"
-            spellcheck="false"
-            autocomplete="off"
-            placeholder="/home/…/grow/workspace"
-          />
+          <div class="console-workspace-row">
+            <input
+              id="workspace-input"
+              class="path-input"
+              type="text"
+              spellcheck="false"
+              autocomplete="off"
+              placeholder="/home/…/grow/workspace"
+            />
+            <div id="recent-row" class="console-recents" hidden>
+              <span class="console-recent-label">Недавние:</span>
+              <select
+                id="recent-select"
+                class="console-recent-select"
+                aria-label="Недавние папки"
+              ></select>
+            </div>
+          </div>
         </div>
         <button id="workspace-open" class="small-button primary" type="button">Открыть</button>
       </section>
@@ -407,7 +477,7 @@
             <textarea
               id="chat-input"
               class="chat-input"
-              rows="3"
+              rows="2"
               placeholder="Например: сделай тьютора мягче и короче"
             ></textarea>
             <button id="chat-send" class="start-button chat-send" type="submit">Отправить</button>

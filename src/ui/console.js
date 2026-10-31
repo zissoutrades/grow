@@ -15,6 +15,7 @@
 // falls back to the last session folder or GROW_WORKSPACE.
 
 const WORKSPACE_STORAGE_KEY = "grow.consoleWorkspace";
+const RECENTS_URL = "/api/workspaces/recent";
 const STATE_POLL_MS = 2000;
 
 const CONFIG_PATHS = {
@@ -34,6 +35,8 @@ const els = {
   status: must("status"),
   workspaceInput: must("workspace-input"),
   workspaceOpen: must("workspace-open"),
+  recentRow: must("recent-row"),
+  recentSelect: must("recent-select"),
   closeSession: must("close-session-button"),
   chatLog: must("chat-log"),
   chatForm: must("chat-form"),
@@ -72,6 +75,46 @@ function rememberWorkspace() {
   } else {
     localStorage.removeItem(WORKSPACE_STORAGE_KEY);
   }
+}
+
+/**
+ * Prefill the workspace field from the proxy's recent list (PROTOCOL §2) and
+ * reveal the picker once there are at least two. Optional polish: a failure
+ * leaves the existing localStorage value untouched.
+ */
+async function loadRecents() {
+  try {
+    const response = await fetch(RECENTS_URL);
+    if (!response.ok) {
+      return;
+    }
+    const payload = await response.json();
+    const paths = recentPaths(payload);
+    if (paths.length === 0) {
+      return;
+    }
+    els.workspaceInput.value = paths[0];
+    els.recentSelect.textContent = "";
+    for (const path of paths) {
+      const option = document.createElement("option");
+      option.value = path;
+      option.textContent = path;
+      els.recentSelect.appendChild(option);
+    }
+    els.recentRow.hidden = paths.length < 2;
+  } catch (error) {
+    console.warn("could not load recent workspaces", error);
+  }
+}
+
+function recentPaths(payload) {
+  if (payload === null || typeof payload !== "object" || !Array.isArray(payload.recents)) {
+    return [];
+  }
+  return payload.recents
+    .filter((recent) => recent !== null && typeof recent === "object")
+    .map((recent) => recent.path)
+    .filter((path) => typeof path === "string" && path.length > 0);
 }
 
 async function api(path, options = {}) {
@@ -539,6 +582,11 @@ function openWorkspace() {
 }
 
 els.workspaceInput.value = localStorage.getItem(WORKSPACE_STORAGE_KEY) ?? "";
+els.recentSelect.addEventListener("change", () => {
+  if (els.recentSelect.value.length > 0) {
+    els.workspaceInput.value = els.recentSelect.value;
+  }
+});
 els.workspaceOpen.addEventListener("click", openWorkspace);
 els.workspaceInput.addEventListener("keydown", (event) => {
   if (event.key === "Enter") {
@@ -575,6 +623,7 @@ els.closeSession.addEventListener("click", () => void closeSession());
 
 selectConfig("tutor");
 void (async () => {
+  await loadRecents();
   try {
     await refreshState();
   } catch {

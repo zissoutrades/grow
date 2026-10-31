@@ -138,6 +138,36 @@ body {
   outline-offset: 1px;
 }
 
+.recent-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 10px;
+}
+
+.recent-label {
+  flex: 0 0 auto;
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.recent-select {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 14px 16px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: #101822;
+  color: var(--text);
+  font: inherit;
+  font-size: 16px;
+}
+
+.recent-select:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
 .start-button {
   width: 100%;
   margin-top: 20px;

@@ -11,6 +11,7 @@ import {
   readConsoleFiles,
   writeConsoleConfig,
 } from "./console";
+import { readRecents, recordRecent, recentsFilePath } from "./recents";
 import { Session, type ClientSink, type FinalizeReason } from "./session";
 import { uiAsset } from "./static";
 import type { ChildActionKind } from "./tools";
@@ -67,6 +68,9 @@ export function createServer(port: number = PORT): Server {
 
       if (url.pathname === "/api/start" && request.method === "POST") {
         return handleStart(request);
+      }
+      if (url.pathname === "/api/workspaces/recent" && request.method === "GET") {
+        return json({ recents: readRecents(recentsFilePath()) });
       }
       if (url.pathname === "/api/close" && request.method === "POST") {
         return handleClose(request);
@@ -148,6 +152,7 @@ async function handleStart(request: Request): Promise<Response> {
     sessions.set(started.sessionId, session);
     lastSessionId = started.sessionId;
     lastWorkspacePath = workspacePath;
+    recordRecent(recentsFilePath(), workspacePath);
     return json({ sessionId: started.sessionId, files: started.files });
   } catch (error) {
     return json({ error: errorMessage(error) }, 500);

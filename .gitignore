@@ -12,6 +12,7 @@ venv/
 # Runtime artifacts
 *.log
 sessions/
+recents.json
 # (the workspace folder lives beside the executable, not in this repo)
 
 # IDE

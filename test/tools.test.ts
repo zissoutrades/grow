@@ -33,6 +33,16 @@ describe("executeToolCall", () => {
     expect(result.canvas).toBeUndefined();
   });
 
+  test("advance_beat accepts the extend beat", () => {
+    const result = executeToolCall({
+      name: "advance_beat",
+      args: { beatId: "extend", outcome: "ok" },
+    });
+
+    expect(result.beat).toEqual({ beatId: "extend", outcome: "ok" });
+    expect(result.response).toEqual({ ok: true });
+  });
+
   test("advance_beat rejects an unknown beat id", () => {
     expect(() =>
       executeToolCall({ name: "advance_beat", args: { beatId: "warmup", outcome: "ok" } }),

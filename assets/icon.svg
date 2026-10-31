@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <title>Grow seedling</title>
+  <g fill="#4fd68b">
+    <path
+      d="M128 228V112"
+      fill="none"
+      stroke="#4fd68b"
+      stroke-width="16"
+      stroke-linecap="round"
+    />
+    <path d="M128 178C96 174 64 146 44 100C82 94 122 128 128 168Z" />
+    <path d="M128 150C160 146 192 120 212 74C174 68 134 102 128 142Z" />
+    <path d="M128 118C110 96 108 60 126 30C146 56 148 92 134 116Z" />
+  </g>
+</svg>

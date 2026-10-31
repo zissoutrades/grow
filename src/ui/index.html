@@ -9,9 +9,12 @@
   <body>
     <header class="topbar">
       <div class="brand">Grow</div>
-      <div id="session-meta" class="session-meta" hidden>
-        <span id="clock" class="clock">00:00</span>
-        <span id="beat" class="beat">этап: —</span>
+      <div style="display: flex; align-items: center; justify-content: flex-end; gap: 12px">
+        <div id="session-meta" class="session-meta" hidden>
+          <span id="clock" class="clock">00:00</span>
+          <span id="beat" class="beat">этап: —</span>
+        </div>
+        <a class="link-button" href="/console" style="margin-top: 0">Консоль родителя</a>
       </div>
     </header>
 
@@ -25,6 +28,10 @@
           этих файлов.
         </p>
         <label class="field-label" for="workspace-path">Папка занятия</label>
+        <div id="recent-row" class="recent-row" hidden>
+          <span class="recent-label">Недавние:</span>
+          <select id="recent-select" class="recent-select" aria-label="Недавние папки"></select>
+        </div>
         <input
           id="workspace-path"
           class="path-input"

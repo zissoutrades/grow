@@ -17,6 +17,7 @@ import {
 
 const WORKLET_URL = new URL("./worklets.js", import.meta.url).href;
 const WORKSPACE_STORAGE_KEY = "grow.workspacePath";
+const RECENTS_URL = "/api/workspaces/recent";
 const AFTER_POLL_MS = 1500;
 const AFTER_POLL_LIMIT = 40;
 /**
@@ -34,6 +35,7 @@ const BEAT_LABELS = {
   attempt: "пробуем",
   diagnose: "разбираемся",
   repair: "исправляем",
+  extend: "расширяем",
   consolidate: "закрепляем",
   reflect: "подводим итог",
   close: "прощаемся",
@@ -64,6 +66,8 @@ const sessionMeta = must("session-meta");
 const clockEl = must("clock");
 const beatEl = must("beat");
 const workspaceInput = must("workspace-path");
+const recentRow = must("recent-row");
+const recentSelect = must("recent-select");
 const startButton = must("start-button");
 const closeButton = must("close-button");
 const transcriptEl = must("transcript");
@@ -585,6 +589,48 @@ async function pollAfter() {
   }
 }
 
+// --- Recent workspaces (PROTOCOL §2) --------------------------------------
+
+/**
+ * Prefill the workspace field from the proxy's recent list (most recent first)
+ * and reveal the picker once there are at least two. The route is optional
+ * polish: a failure leaves the landing form exactly as it was.
+ */
+async function loadRecents() {
+  try {
+    const response = await fetch(RECENTS_URL);
+    if (!response.ok) {
+      return;
+    }
+    const payload = await response.json();
+    const paths = recentPaths(payload);
+    if (paths.length === 0) {
+      return;
+    }
+    workspaceInput.value = paths[0];
+    recentSelect.textContent = "";
+    for (const path of paths) {
+      const option = document.createElement("option");
+      option.value = path;
+      option.textContent = path;
+      recentSelect.appendChild(option);
+    }
+    recentRow.hidden = paths.length < 2;
+  } catch (error) {
+    console.warn("could not load recent workspaces", error);
+  }
+}
+
+function recentPaths(payload) {
+  if (payload === null || typeof payload !== "object" || !Array.isArray(payload.recents)) {
+    return [];
+  }
+  return payload.recents
+    .filter((recent) => recent !== null && typeof recent === "object")
+    .map((recent) => recent.path)
+    .filter((path) => typeof path === "string" && path.length > 0);
+}
+
 // --- Session lifecycle ----------------------------------------------------
 
 function resetSessionUi() {
@@ -770,6 +816,12 @@ function returnToLanding(message = "Готово.", tone = "info") {
 // --- Wiring ---------------------------------------------------------------
 
 workspaceInput.value = localStorage.getItem(WORKSPACE_STORAGE_KEY) ?? "";
+recentSelect.addEventListener("change", () => {
+  if (recentSelect.value.length > 0) {
+    workspaceInput.value = recentSelect.value;
+  }
+});
+void loadRecents();
 startButton.addEventListener("click", () => void startSession());
 workspaceInput.addEventListener("keydown", (event) => {
   if (event.key === "Enter") {
