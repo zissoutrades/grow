@@ -95,12 +95,14 @@ describe("package locale", () => {
     expect(result.systemInstruction).not.toMatch(CYRILLIC);
   });
 
-  test("the English runtime instruction carries the directive correction rules", () => {
+  test("the English runtime instruction leaves correction policy to tutor.md", () => {
     const folder = englishWorkspace();
 
     const result = buildPackage(folder, "en");
+    const runtime = result.systemInstruction.split("\n\n=== config/tutor.md ===")[0];
 
-    expect(result.systemInstruction).toContain(
+    expect(runtime).not.toContain('say "no"');
+    expect(result.systemInstruction).not.toContain(
       'If the child answers wrong, say "no", then say the correct answer and ask the child to repeat it.',
     );
     expect(result.systemInstruction).toContain(

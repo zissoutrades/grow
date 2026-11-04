@@ -75,7 +75,7 @@ should use that word - proof that the parent's edit reached the tutor.
 In `config/tutor.md`, replace the one paragraph under `## Method` with exactly:
 
 ```
-Method: ask, don't tell. When Ivan answers, ask "How did you get that?" before saying whether it is right. If he is unsure, ask what would help him check: the ten-frame, counting on his fingers, or a smaller step. Never give the answer; let him find it and name it himself.
+Method: ask, don't tell. When Ivan answers, ask "How did you get that?" before saying whether it is right. If he is unsure, ask what would help him check: the ten-frame, counting on his fingers, or a smaller step. Never give the answer; let him find it and name it himself. If the lesson plan says to reveal the answer, don't - follow this Method paragraph instead.
 ```
 
 Start a new session: the tutor asks how Ivan got his answer instead of telling

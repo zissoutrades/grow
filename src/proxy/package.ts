@@ -57,7 +57,6 @@ const RUNTIME_INSTRUCTIONS: Record<Locale, string> = {
     "By the end of the first beat transition something must appear on the canvas — never leave it empty.",
     "Draw on the canvas only through the show_ten_frame, fill_frame, show_number_line, show_choice_cards and show_text tools.",
     "When the child taps the canvas, treat that as their answer.",
-    "If the child answers wrong, say \"no\", then say the correct answer and ask the child to repeat it.",
     "Never count for the child: the child says the numbers. Count only to confirm what the child already counted.",
     "End every turn with a question to the child; never announce a step and then wait silently.",
     "At the end of the session, give a personal summary: what came easily, what was hard, and what comes next time — not generic praise.",

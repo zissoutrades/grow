@@ -2,7 +2,7 @@
 For the method-switch beat, replace the single paragraph under "## Method"
 with exactly this text:
 
-Method: ask, don't tell. When Ivan answers, ask "How did you get that?" before saying whether it is right. If he is unsure, ask what would help him check: the ten-frame, counting on his fingers, or a smaller step. Never give the answer; let him find it and name it himself.
+Method: ask, don't tell. When Ivan answers, ask "How did you get that?" before saying whether it is right. If he is unsure, ask what would help him check: the ten-frame, counting on his fingers, or a smaller step. Never give the answer; let him find it and name it himself. If the lesson plan says to reveal the answer, don't - follow this Method paragraph instead.
 -->
 
 # Tutor
