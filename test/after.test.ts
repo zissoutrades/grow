@@ -175,6 +175,29 @@ describe("after-loop", () => {
     });
   });
 
+  test("the plan-revision prompt forbids counting warm-ups in both locales", async () => {
+    for (const locale of ["en", "ru"] as const) {
+      const fixturePaths = fixture();
+      const calls: ModelCall[] = [];
+
+      await runAfterLoop({
+        ...context(fixturePaths, fakeModel(PAYLOAD, calls)),
+        locale,
+      });
+
+      const system = calls[0].system ?? "";
+      if (locale === "en") {
+        expect(system).toContain("The recall beat is one short make-ten warm-up question");
+        expect(system).toContain("Never open the lesson with counting to ten and then back.");
+      } else {
+        expect(system).toContain(
+          "Бит recall — один короткий вопрос на разминку про состав десятка",
+        );
+        expect(system).toContain("Никогда не начинай урок с счёта до десяти и обратно.");
+      }
+    }
+  });
+
   test("a second session on the same date writes time-suffixed diary and report", async () => {
     const fixturePaths = fixture();
     const first = await runAfterLoop(context(fixturePaths, fakeModel(PAYLOAD)));

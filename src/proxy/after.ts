@@ -96,7 +96,7 @@ const SYSTEM_PROMPTS: Record<Locale, string> = {
     'Схема: {"diary": "…", "report": "…", "planRevision": "…"}',
     "diary — короткая тёплая запись для родителя, 3–5 предложений: как прошло занятие, что получилось.",
     "report — разбор для родителя: что происходило, какие были сигналы (успехи, трудности, ошибки), что это значит для следующих занятий.",
-    "planRevision — полный план следующего занятия в том же формате, что файл plans/lesson-*.md: заголовок с датой, нумерованные шаги по битам (recall, present, attempt, diagnose, repair, extend, consolidate, reflect, close).",
+    "planRevision — полный план следующего занятия в том же формате, что файл plans/lesson-*.md: заголовок с датой, нумерованные шаги по битам (recall, present, attempt, diagnose, repair, extend, consolidate, reflect, close). Бит recall — один короткий вопрос на разминку про состав десятка (например: «Что идёт к 9, чтобы получился десяток?»). Никогда не начинай урок с счёта до десяти и обратно.",
     "Опирайся только на стенограмму и файлы; не выдумывай фактов. Никаких пояснений вокруг JSON.",
   ].join("\n"),
   en: [
@@ -106,7 +106,7 @@ const SYSTEM_PROMPTS: Record<Locale, string> = {
     'Schema: {"diary": "…", "report": "…", "planRevision": "…"}',
     "diary — a short, warm note for the parent, 3–5 sentences: how the session went and what went well.",
     "report — an analysis for the parent: what happened, which signals appeared (successes, struggles, mistakes), and what they mean for the next sessions.",
-    "planRevision — the full plan for the next session in the same format as plans/lesson-*.md: a dated header and numbered steps for the beats (recall, present, attempt, diagnose, repair, extend, consolidate, reflect, close).",
+    "planRevision — the full plan for the next session in the same format as plans/lesson-*.md: a dated header and numbered steps for the beats (recall, present, attempt, diagnose, repair, extend, consolidate, reflect, close). The recall beat is one short make-ten warm-up question (for example: \"What goes with 9 to make ten?\"). Never open the lesson with counting to ten and then back.",
     "Use only the transcript and the files; do not invent facts. No text around the JSON.",
   ].join("\n"),
 };

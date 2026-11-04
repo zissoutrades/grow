@@ -96,7 +96,7 @@ const SESSION_STRINGS: Record<Locale, SessionStrings> = {
   ru: {
     closeInstruction: "Приблизься к финальному биту: рефлексия и прощание.",
     greetingInstruction:
-      "Поздоровайся коротко по-русски и дождись ответа ребёнка; первый бит начинай только после того, как ребёнок ответит.",
+      "Поприветствуй ребёнка по имени из памяти и одним коротким предложением скажи, чем займётесь сегодня (из цели плана; например: «Привет, Иван, сегодня мы составляем десяток»). Не спрашивай имя ребёнка; если имени нет в памяти, поприветствуй без имени. Затем сразу начни первый этап: вызови advance_beat для recall и задай его вопрос.",
     greetingRetries: [
       "Ребёнок пока не ответил. Коротко спроси по-русски: «Ты меня слышишь?»",
       "Ребёнок всё ещё не отвечает. Ещё раз коротко спроси по-русски: «Ты меня слышишь?»",
@@ -109,7 +109,7 @@ const SESSION_STRINGS: Record<Locale, SessionStrings> = {
   en: {
     closeInstruction: "Move toward the final beat: reflection and goodbye.",
     greetingInstruction:
-      "Greet the child warmly and ask their name; wait for the child's answer — start the first beat only after the child responds.",
+      "Greet the child by name from memory and say in one short sentence what today's lesson is, from the plan's goal (for example: \"Hello Ivan, today we make ten\"). Do not ask the child's name; if memory has no name, greet without one. Then immediately begin the first beat: call advance_beat for recall and ask its question.",
     greetingRetries: [
       "The child has not answered yet. Ask briefly in English: “Can you hear me?”",
       "The child still isn't answering. Ask once more, briefly: “Can you hear me?”",
@@ -130,9 +130,9 @@ export function sessionStrings(locale: Locale): SessionStrings {
 export const CLOSE_INSTRUCTION = SESSION_STRINGS.ru.closeInstruction;
 
 /**
- * Start failsafe (owner spec U10.1, refined by U13.1). The tutor greets first,
- * but says only hello and waits: the first beat starts only after the child
- * answers (the model's own flow), never immediately after the greeting.
+ * Start failsafe (owner spec U10.1, refined by U13.1/U21). The tutor greets
+ * first and immediately begins the first beat; the failsafe now guards the
+ * silence after that first question, not a name question.
  */
 export const GREETING_INSTRUCTION = SESSION_STRINGS.ru.greetingInstruction;
 

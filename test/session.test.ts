@@ -147,9 +147,11 @@ function settleTutor(harness: { session: Session; gemini: FakeGemini }): void {
 }
 
 describe("Session", () => {
-  test("the greeting instruction tells the tutor to wait for the child", () => {
-    expect(GREETING_INSTRUCTION).toContain("дождись ответа ребёнка");
-    expect(GREETING_INSTRUCTION).toContain("только после того, как ребёнок ответит");
+  test("the greeting instruction greets by name and begins the first beat", () => {
+    expect(GREETING_INSTRUCTION).toContain("по имени из памяти");
+    expect(GREETING_INSTRUCTION).toContain("сразу начни первый этап");
+    expect(GREETING_INSTRUCTION).toContain("вызови advance_beat для recall");
+    expect(GREETING_INSTRUCTION).not.toContain("дождись ответа ребёнка");
     expect(GREETING_INSTRUCTION).not.toContain("сразу переходи");
   });
 
@@ -649,7 +651,8 @@ describe("demo locale", () => {
   test("the English session prompts carry no Cyrillic", () => {
     const strings = sessionStrings("en");
 
-    expect(strings.greetingInstruction).toContain("wait for the child's answer");
+    expect(strings.greetingInstruction).toContain("Do not ask the child's name");
+    expect(strings.greetingInstruction).toContain("immediately begin the first beat");
     expect(strings.greetingRetries).toHaveLength(2);
     expect(strings.noResponseFarewell).toContain("I'll end the session");
     expect(strings.childUnresponsiveNudge).toContain("Are you there?");
@@ -664,6 +667,17 @@ describe("demo locale", () => {
     ]) {
       expect(text).not.toMatch(/[А-Яа-яЁё]/);
     }
+  });
+
+  test("both greetings use the child's name from memory and begin the first beat immediately", () => {
+    const ru = sessionStrings("ru");
+    const en = sessionStrings("en");
+
+    expect(en.greetingInstruction).toContain("by name from memory");
+    expect(en.greetingInstruction).not.toContain("ask their name");
+    expect(ru.greetingInstruction).toContain("по имени из памяти");
+    expect(ru.greetingInstruction).toContain("Не спрашивай имя ребёнка");
+    expect(ru.greetingInstruction).toContain("сразу начни первый этап");
   });
 
   test("a session started with the en locale greets in English", async () => {
