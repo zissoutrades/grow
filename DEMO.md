@@ -39,6 +39,7 @@ The template contains:
 
 ```
 config/tutor.md              policy paragraph under "## Method"
+config/rules.md              house rules — shown in the console Rules tab (read-only)
 config/curriculum.md         make-ten arithmetic, age 6
 memory/child.md              Ivan, age 6
 plans/lesson-2026-11-02.md   the first filmed lesson (8 + 5)

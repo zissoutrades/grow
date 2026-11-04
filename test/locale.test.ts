@@ -136,10 +136,14 @@ describe("package locale", () => {
 
     expect(result.files.map((file) => file.path)).toEqual([
       "config/tutor.md",
+      "config/rules.md",
       "config/curriculum.md",
       "plans/lesson-2026-11-02.md",
       "memory/child.md",
     ]);
+    expect(result.systemInstruction).toContain(
+      "Move the number-line marker only after the child answers",
+    );
     expect(result.systemInstruction).toContain("8 + 5");
     expect(result.systemInstruction).toContain("## Season");
     expect(result.systemInstruction).toContain("3. Shapes and measurement.");

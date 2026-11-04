@@ -83,9 +83,10 @@ const PACKAGE_COPY: Record<Locale, PackageCopy> = {
 /**
  * Build the deterministic session package from a workspace folder.
  *
- * Order: runtime instructions, tutor config, curriculum, newest lesson plan,
- * child memory, then one line of canvas state (PROTOCOL §4). No model calls,
- * no clock.
+ * Order: runtime instructions, tutor config, the optional `config/rules.md`,
+ * curriculum, newest lesson plan, child memory, then one line of canvas state
+ * (PROTOCOL §4 plus the optional house-rules section). No model calls, no
+ * clock.
  */
 export function buildPackage(
   workspacePath: string,
@@ -117,6 +118,9 @@ export function buildPackage(
   };
 
   appendFile("config/tutor.md");
+  if (isFile(join(workspacePath, "config/rules.md"))) {
+    appendFile("config/rules.md");
+  }
   appendFile("config/curriculum.md");
 
   const newestLesson = findNewestLesson(workspacePath);

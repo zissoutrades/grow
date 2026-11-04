@@ -60,6 +60,32 @@ describe("buildPackage", () => {
     ]);
   });
 
+  test("includes an optional rules file after the tutor and before the curriculum", () => {
+    const folder = workspace();
+    writeFileSync(join(folder, "config/rules.md"), "ПРАВИЛА\n");
+
+    const result = buildPackage(folder);
+
+    const tutor = result.systemInstruction.indexOf("ТЬЮТОР");
+    const rules = result.systemInstruction.indexOf("ПРАВИЛА");
+    const curriculum = result.systemInstruction.indexOf("ПРОГРАММА");
+    expect(rules).toBeGreaterThan(tutor);
+    expect(curriculum).toBeGreaterThan(rules);
+    expect(result.files).toContainEqual({
+      path: "config/rules.md",
+      bytes: Buffer.byteLength("ПРАВИЛА\n"),
+    });
+  });
+
+  test("omits the rules file when the workspace does not have one", () => {
+    const folder = workspace();
+
+    const result = buildPackage(folder);
+
+    expect(result.files.map((file) => file.path)).not.toContain("config/rules.md");
+    expect(result.systemInstruction).not.toContain("config/rules.md");
+  });
+
   test("treats a same-date suffixed plan as newer than the plain plan", () => {
     const folder = workspace();
     writeFileSync(join(folder, "plans/lesson-2026-10-27-1530.md"), "РЕВИЗИЯ\n");

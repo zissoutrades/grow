@@ -114,7 +114,7 @@ export function readConsoleConfig(workspacePath: string): ConsoleConfig {
   return {
     tutor: readWorkspaceText(workspacePath, "config/tutor.md"),
     curriculum: readWorkspaceText(workspacePath, "config/curriculum.md"),
-    permissions: readWorkspaceText(workspacePath, "config/permissions.json"),
+    permissions: readWorkspaceText(workspacePath, "config/rules.md"),
     presets: listPresets(workspacePath),
   };
 }

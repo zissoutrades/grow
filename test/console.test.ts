@@ -37,7 +37,7 @@ function workspace(): string {
   }
   writeFileSync(join(folder, "config/tutor.md"), "Ты — тьютор.\nГовори коротко.\n");
   writeFileSync(join(folder, "config/curriculum.md"), "Тема недели: состав числа 10.\n");
-  writeFileSync(join(folder, "config/permissions.json"), '{"mic":true}\n');
+  writeFileSync(join(folder, "config/rules.md"), "# Rules\n\nWait for the answer.\n");
   writeFileSync(join(folder, "config/presets/gentle.md"), "Ты — очень мягкий тьютор.\n");
   writeFileSync(join(folder, "config/presets/strict.md"), "Ты — строгий тьютор.\n");
   writeFileSync(join(folder, "memory/diary/2026-10-26.md"), "Дневник 26.\n");
@@ -105,7 +105,7 @@ describe("workspace reads", () => {
 
     expect(config.tutor).toContain("Ты — тьютор.");
     expect(config.curriculum).toContain("состав числа 10");
-    expect(config.permissions).toBe('{"mic":true}\n');
+    expect(config.permissions).toBe("# Rules\n\nWait for the answer.\n");
     expect(config.presets).toEqual(["gentle.md", "strict.md"]);
   });
 
@@ -234,11 +234,11 @@ describe("manager chat loop", () => {
   test("a failed tool is reported to the model instead of aborting the turn", async () => {
     const folder = workspace();
     const fake = scripted([
-      '{"tool":"edit_config","args":{"path":"config/permissions.json","content":"{}"}}',
+      '{"tool":"edit_config","args":{"path":"config/rules.md","content":"{}"}}',
       "Этот файл менять нельзя.",
     ]);
 
-    const result = await consoleChat("Поменяй права", {
+    const result = await consoleChat("Поменяй правила", {
       workspacePath: folder,
       generateText: fake.generate,
     });
@@ -246,8 +246,8 @@ describe("manager chat loop", () => {
     expect(result.reply).toBe("Этот файл менять нельзя.");
     const action = result.actions[0];
     expect(action.result).toHaveProperty("error");
-    expect(readFileSync(join(folder, "config/permissions.json"), "utf8")).toBe(
-      '{"mic":true}\n',
+    expect(readFileSync(join(folder, "config/rules.md"), "utf8")).toBe(
+      "# Rules\n\nWait for the answer.\n",
     );
   });
 
@@ -364,10 +364,10 @@ describe("direct parent edits", () => {
     );
   });
 
-  test("refuses to write files outside the two config files", () => {
+  test("refuses to write the read-only rules file", () => {
     const folder = workspace();
 
-    expect(() => writeConsoleConfig(folder, "config/permissions.json", "{}")).toThrow(
+    expect(() => writeConsoleConfig(folder, "config/rules.md", "{}")).toThrow(
       ConsoleError,
     );
   });
