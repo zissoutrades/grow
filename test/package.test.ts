@@ -99,13 +99,23 @@ describe("buildPackage", () => {
     expect(kickoff).toBeGreaterThan(advanceBeat);
   });
 
-  test("the runtime waits for the child's answer before advancing the beat", () => {
+  test("tells the tutor to call advance_beat as the beat begins", () => {
     const folder = workspace();
 
     const result = buildPackage(folder);
 
     expect(result.systemInstruction).toContain(
-      "Дождись ответа ребёнка на твой вопрос, прежде чем переходить к следующему этапу. Не переключай этап посреди своей же фразы.",
+      "Вызывай advance_beat, когда начинаешь новый этап, перед вопросом этого этапа. Затем задай вопрос и дождись ответа ребёнка, прежде чем вызывать advance_beat для следующего этапа.",
+    );
+  });
+
+  test("keeps the Russian correction instruction", () => {
+    const folder = workspace();
+
+    const result = buildPackage(folder);
+
+    expect(result.systemInstruction).toContain(
+      "Если ребёнок ошибся — помоги найти ошибку, не говори «неправильно».",
     );
   });
 

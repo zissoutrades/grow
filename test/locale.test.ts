@@ -89,10 +89,26 @@ describe("package locale", () => {
     );
     expect(result.systemInstruction).toContain("Answer and write only in English, using Latin letters.");
     expect(result.systemInstruction).toContain(
-      "Wait for the child to answer your question before advancing the beat. Do not advance the beat in the middle of your own sentence.",
+      "Call advance_beat when you begin a new beat, before you ask that beat's question. Then ask the question and wait for the child's answer before calling advance_beat for the next beat.",
     );
     expect(result.systemInstruction).toContain("Canvas state: the canvas is empty.");
     expect(result.systemInstruction).not.toMatch(CYRILLIC);
+  });
+
+  test("the English runtime instruction carries the directive correction rules", () => {
+    const folder = englishWorkspace();
+
+    const result = buildPackage(folder, "en");
+
+    expect(result.systemInstruction).toContain(
+      'If the child answers wrong, say "no", then say the correct answer and ask the child to repeat it.',
+    );
+    expect(result.systemInstruction).toContain(
+      "Never count for the child: the child says the numbers. Count only to confirm what the child already counted.",
+    );
+    expect(result.systemInstruction).toContain(
+      "End every turn with a question to the child; never announce a step and then wait silently.",
+    );
   });
 
   test("buildPackage defaults to GROW_LOCALE", () => {
