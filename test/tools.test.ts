@@ -181,10 +181,10 @@ describe("tool locale", () => {
       "Mark a transition to the next lesson beat. Call it at every transition.",
     );
     expect(tenFrame?.description).toBe(
-      "Show a ten-frame on the canvas with cells filled left to right.",
+      "Show a ten-frame on the canvas with cells filled left to right. This replaces the whole frame and clears any cells you filled one by one with fill_frame.",
     );
     expect(fill?.description).toBe(
-      "Fill one cell of the ten-frame on the canvas.",
+      "Add one cell to the existing ten-frame on the canvas.",
     );
     expect(declarations.map((declaration) => declaration.name)).toEqual(
       TOOL_DECLARATIONS.map((declaration) => declaration.name),
@@ -198,6 +198,19 @@ describe("tool locale", () => {
     );
     expect(formatChildAction({ kind: "numberline", value: { value: 8 } }, "en")).toBe(
       "[canvas] child tapped: number 8",
+    );
+  });
+
+  test("the Russian ten-frame descriptions spell out the replace semantics", () => {
+    const declarations = toolDeclarations("ru");
+    const tenFrame = declarations.find((declaration) => declaration.name === "show_ten_frame");
+    const fill = declarations.find((declaration) => declaration.name === "fill_frame");
+
+    expect(tenFrame?.description).toBe(
+      "Показать на холсте тен-фрейм с заполненными слева направо клетками. Показ заменяет весь фрейм и очищает клетки, заполненные по одной через fill_frame.",
+    );
+    expect(fill?.description).toBe(
+      "Добавить одну клетку к существующему тен-фрейму на холсте.",
     );
   });
 

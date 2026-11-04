@@ -17,6 +17,7 @@ import {
   GREETING_RETRY_INSTRUCTIONS,
   NO_RESPONSE_FAREWELL,
   Session,
+  sanitizeTranscript,
   sessionStrings,
   type ClientSink,
   type SessionGemini,
@@ -509,6 +510,98 @@ describe("Session", () => {
     const end = records.find((record) => record.kind === "session_end");
     expect(end?.reason).toBe("timeout");
   });
+
+  test("sanitizes leaked tool syntax before logging and forwarding a transcript", async () => {
+    const { session, gemini, sink } = await startSession();
+
+    gemini.callbacks.onTranscript(
+      "tutor",
+      "<signature>call:advance_beat{beatId:repair,outcome:ok}8 and 2 make 10, let's",
+      false,
+    );
+
+    const forwarded = sink.json.find((message) => message.type === "transcript");
+    expect(forwarded?.text).toBe("8 and 2 make 10, let's");
+
+    const folder = await session.finalize("child_tap");
+    const records = readJournal(join(folder, "session.jsonl"));
+    const transcript = records.find((record) => record.kind === "transcript");
+    expect(transcript?.text).toBe("8 and 2 make 10, let's");
+  });
+
+  test("defers advance_beat until the tutor turn completes", async () => {
+    const { session, gemini, sink } = await startSession();
+    // The greeting turn is still in flight right after start().
+    gemini.callbacks.onToolCall([
+      { id: "call-1", name: "advance_beat", args: { beatId: "recall", outcome: "ok" } },
+    ]);
+
+    expect(sink.json.some((message) => message.type === "beat")).toBe(false);
+    // The upstream tool response is never delayed (Gemini waits for it).
+    expect(gemini.toolResponses).toHaveLength(1);
+
+    gemini.callbacks.onTurnEvent("turn_complete");
+
+    expect(sink.json.find((message) => message.type === "beat")).toEqual({
+      type: "beat",
+      beatId: "recall",
+      outcome: "ok",
+    });
+    await session.finalize("child_tap");
+  });
+
+  test("a tutor transcript opens the turn for beat deferral", async () => {
+    const { session, gemini, sink } = await startSession();
+    gemini.callbacks.onTurnEvent("turn_complete");
+
+    // The transcript arrives before the first audio frame of the next turn.
+    gemini.callbacks.onTranscript("tutor", "Let's count together.", false);
+    gemini.callbacks.onToolCall([
+      { id: "call-2", name: "advance_beat", args: { beatId: "present", outcome: "ok" } },
+    ]);
+    expect(sink.json.some((message) => message.type === "beat")).toBe(false);
+
+    gemini.callbacks.onTurnEvent("turn_complete");
+    expect(sink.json.find((message) => message.type === "beat")).toEqual({
+      type: "beat",
+      beatId: "present",
+      outcome: "ok",
+    });
+    await session.finalize("child_tap");
+  });
+
+  test("flushes a deferred beat when the tutor turn is interrupted", async () => {
+    const { session, gemini, sink } = await startSession();
+    gemini.callbacks.onToolCall([
+      { id: "call-3", name: "advance_beat", args: { beatId: "diagnose", outcome: "struggle" } },
+    ]);
+    expect(sink.json.some((message) => message.type === "beat")).toBe(false);
+
+    gemini.callbacks.onTurnEvent("interrupted");
+
+    expect(sink.json.find((message) => message.type === "beat")).toEqual({
+      type: "beat",
+      beatId: "diagnose",
+      outcome: "struggle",
+    });
+    await session.finalize("child_tap");
+  });
+
+  test("emits advance_beat immediately when no tutor turn is active", async () => {
+    const { session, gemini, sink } = await startSession();
+    gemini.callbacks.onTurnEvent("turn_complete");
+
+    gemini.callbacks.onToolCall([
+      { id: "call-4", name: "advance_beat", args: { beatId: "extend", outcome: "ok" } },
+    ]);
+
+    expect(sink.json.find((message) => message.type === "beat")).toEqual({
+      type: "beat",
+      beatId: "extend",
+      outcome: "ok",
+    });
+    await session.finalize("child_tap");
+  });
 });
 
 function readJournal(path: string): Array<Record<string, unknown>> {
@@ -521,6 +614,36 @@ function readJournal(path: string): Array<Record<string, unknown>> {
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
+
+describe("sanitizeTranscript", () => {
+  test("drops a metadata block entirely", () => {
+    expect(sanitizeTranscript("\n<metadata>\n</metadata>")).toBe("");
+  });
+
+  test("drops an unterminated signature tool call", () => {
+    expect(sanitizeTranscript("<signature>call:advance_beat{beatId:recall,outcome")).toBe("");
+  });
+
+  test("keeps the speech that follows a closed tool call", () => {
+    expect(
+      sanitizeTranscript(
+        "<signature>call:advance_beat{beatId:repair,outcome:ok}8 and 2 make 10, let's",
+      ),
+    ).toBe("8 and 2 make 10, let's");
+  });
+
+  test("drops function_call syntax with nested arguments", () => {
+    expect(
+      sanitizeTranscript('sure function_call{name:"advance_beat",args:{beatId:"present"}} now'),
+    ).toBe("sure now");
+  });
+
+  test("leaves ordinary tutor speech untouched", () => {
+    expect(sanitizeTranscript("Great job! Step 13 is next — how did you know?")).toBe(
+      "Great job! Step 13 is next — how did you know?",
+    );
+  });
+});
 
 describe("demo locale", () => {
   test("the English session prompts carry no Cyrillic", () => {

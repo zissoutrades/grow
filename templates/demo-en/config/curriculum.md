@@ -1,5 +1,11 @@
 # Curriculum: Arithmetic (age 6)
 
+## Season
+
+1. Numbers to 100: count, compare, make ten.
+2. Addition and subtraction within 20.
+3. Shapes and measurement.
+
 ## Current topic
 
 Make ten: the pairs that add up to 10.

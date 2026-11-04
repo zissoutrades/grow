@@ -88,6 +88,9 @@ describe("package locale", () => {
       "You are a voice math tutor for a six-year-old child.",
     );
     expect(result.systemInstruction).toContain("Answer and write only in English, using Latin letters.");
+    expect(result.systemInstruction).toContain(
+      "Wait for the child to answer your question before advancing the beat. Do not advance the beat in the middle of your own sentence.",
+    );
     expect(result.systemInstruction).toContain("Canvas state: the canvas is empty.");
     expect(result.systemInstruction).not.toMatch(CYRILLIC);
   });
@@ -122,6 +125,11 @@ describe("package locale", () => {
       "memory/child.md",
     ]);
     expect(result.systemInstruction).toContain("8 + 5");
+    expect(result.systemInstruction).toContain("## Season");
+    expect(result.systemInstruction).toContain("3. Shapes and measurement.");
+    expect(result.systemInstruction.indexOf("## Season")).toBeLessThan(
+      result.systemInstruction.indexOf("## Current topic"),
+    );
     expect(result.systemInstruction).toContain("Ivan");
     expect(result.systemInstruction).toContain("Latin letters");
     expect(result.systemInstruction).not.toMatch(CYRILLIC);
@@ -185,6 +193,11 @@ describe("UI locale dictionary", () => {
     expect(translateFor("en", "beat.diagnose")).toBe("figuring out");
     expect(translateFor("en", "beat.repair")).toBe("fixing");
     expect(translateFor("ru", "beat.recall")).toBe("вспоминаем");
+  });
+
+  test("the console config tab is labelled rules", () => {
+    expect(translateFor("en", "console.tab.permissions")).toBe("rules");
+    expect(translateFor("ru", "console.tab.permissions")).toBe("правила");
   });
 
   test("every data-i18n key in both pages exists in both dictionaries", () => {

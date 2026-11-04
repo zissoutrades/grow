@@ -800,6 +800,12 @@ export class Session {
   private endReason: FinalizeReason | null = null;
   /** True from an injected turn / first tutor audio until `turn_complete`. */
   private tutorTurnActive = false;
+  /**
+   * `advance_beat` transitions the model requested while its own turn was
+   * still in flight. They are released at the end of that turn so the step
+   * indicator never jumps ahead mid-sentence.
+   */
+  private pendingBeats: BeatEvent[] = [];
 
   private startedAtMs = 0;
   private micBytes = 0;
@@ -1083,8 +1089,12 @@ export class Session {
     if (this.state !== "live" || this.log === null) {
       return;
     }
-    this.log.append("transcript", { role, text, partial });
-    this.client?.sendJson({ type: "transcript", role, text, partial });
+    // Gemini sometimes emits its internal scaffolding (metadata/signature tags
+    // and raw tool-call syntax) as transcript text. Only user-facing text is
+    // sanitized; real upstream tool calls keep their own path in onToolCall.
+    const cleanText = sanitizeTranscript(text);
+    this.log.append("transcript", { role, text: cleanText, partial });
+    this.client?.sendJson({ type: "transcript", role, text: cleanText, partial });
     if (role === "child") {
       // The child is there: stop the start-failsafe ladder on the first sign of
       // speech (interim or final). Raw mic frames are continuous and do not count.
@@ -1092,7 +1102,9 @@ export class Session {
       this.timers?.noteChildInput();
     } else {
       // Tutor speech means the child is (naturally) quiet: pause the
-      // mid-session silence countdown until this turn settles.
+      // mid-session silence countdown until this turn settles. A transcript
+      // also means a tutor turn is in flight even before its first audio frame.
+      this.tutorTurnActive = true;
       this.timers?.noteTutorActivity();
     }
     if (!partial) {
@@ -1119,7 +1131,7 @@ export class Session {
       try {
         const execution = executeToolCall(call);
         if (execution.beat !== undefined && execution.beat !== null) {
-          this.emitBeat(execution.beat);
+          this.queueOrEmitBeat(execution.beat);
         }
         if (execution.canvas !== undefined && execution.canvas !== null) {
           this.emitCanvas(execution.canvas);
@@ -1187,10 +1199,15 @@ export class Session {
     this.client?.sendJson({ type: "turn", event });
     if (event === "turn_complete") {
       this.tutorTurnActive = false;
+      this.flushPendingBeats();
       this.timers?.notifyActivity();
       this.timers?.noteTutorTurnComplete();
     } else if (event === "interrupted") {
       this.tutorTurnActive = false;
+      // The turn is over even though it did not complete: release a beat the
+      // model already acknowledged rather than leaving the step indicator
+      // permanently one beat behind.
+      this.flushPendingBeats();
       this.timers?.noteTutorInterrupted();
     }
   }
@@ -1311,6 +1328,31 @@ export class Session {
     }
   }
 
+  /**
+   * A beat transition is a user-facing boundary. The model often calls
+   * `advance_beat` while its own turn is still streaming, which made the step
+   * indicator jump ahead mid-sentence. While a tutor turn is in flight the beat
+   * is queued and released when that turn ends; the upstream tool response is
+   * still sent immediately, so Gemini never waits on the deferred event.
+   */
+  private queueOrEmitBeat(beat: BeatEvent): void {
+    if (this.tutorTurnActive) {
+      this.pendingBeats.push(beat);
+      return;
+    }
+    this.emitBeat(beat);
+  }
+
+  private flushPendingBeats(): void {
+    if (this.pendingBeats.length === 0) {
+      return;
+    }
+    const beats = this.pendingBeats.splice(0, this.pendingBeats.length);
+    for (const beat of beats) {
+      this.emitBeat(beat);
+    }
+  }
+
   private emitBeat(beat: BeatEvent): void {
     this.log?.append("beat", beat);
     this.client?.sendJson({ type: "beat", beatId: beat.beatId, outcome: beat.outcome });
@@ -1424,6 +1466,72 @@ export class Session {
       written: this.written,
     };
   }
+}
+
+/**
+ * Tags Gemini has been observed wrapping its internal scaffolding in. They are
+ * never part of the tutor's speech, so the whole element (including contents)
+ * is dropped when a matching closing tag is present.
+ */
+const LEAKED_CONTAINER_TAGS = ["metadata", "signature"] as const;
+
+/** A standalone or unterminated internal tag (`<signature>`, `</metadata>`). */
+const LEAKED_TAG = /<\/?[a-z][a-z0-9_-]*\b[^>]*?\/?>/gi;
+
+/**
+ * Strip model-internal markup from a transcript chunk before it reaches the
+ * log or the child's screen: `<metadata>`/`<signature>` blocks, any other
+ * angle-bracket tag, and raw `call:name{...}` / `function_call{...}` syntax
+ * (with a balanced or truncated argument block). Pure and idempotent;
+ * ordinary speech is preserved.
+ */
+export function sanitizeTranscript(text: string): string {
+  let clean = text;
+  for (const tag of LEAKED_CONTAINER_TAGS) {
+    const paired = new RegExp(`<${tag}\\b[^>]*>[\\s\\S]*?<\\/${tag}\\s*>`, "gi");
+    clean = clean.replace(paired, " ");
+  }
+  clean = clean.replace(LEAKED_TAG, " ");
+  clean = stripRawToolCalls(clean);
+  return clean.replace(/[ \t]+/g, " ").trim();
+}
+
+function stripRawToolCalls(text: string): string {
+  // Raw tool-call syntax the model can emit as plain text, e.g.
+  // `call:advance_beat{beatId:recall,outcome:ok}` or `function_call{...}`.
+  // Matches only the prefix; the argument block is consumed by brace matching.
+  const toolCall = /\b(?:call\s*:\s*[a-z_][a-z0-9_]*|function_call\s*(?::\s*[a-z_][a-z0-9_]*)?)\s*\{/gi;
+  let result = "";
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = toolCall.exec(text)) !== null) {
+    result += text.slice(lastIndex, match.index);
+    lastIndex = skipBracedBlock(text, match.index + match[0].length);
+    toolCall.lastIndex = lastIndex;
+    result += " ";
+  }
+  return result + text.slice(lastIndex);
+}
+
+/**
+ * Index just past the `}` that closes a braced argument block whose opening
+ * `{` was already consumed, or the end of the string when the chunk was cut
+ * off mid-call.
+ */
+function skipBracedBlock(text: string, from: number): number {
+  let depth = 1;
+  for (let index = from; index < text.length; index += 1) {
+    const char = text[index];
+    if (char === "{") {
+      depth += 1;
+    } else if (char === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        return index + 1;
+      }
+    }
+  }
+  return text.length;
 }
 
 function errorMessage(error: unknown): string {

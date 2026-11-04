@@ -99,6 +99,16 @@ describe("buildPackage", () => {
     expect(kickoff).toBeGreaterThan(advanceBeat);
   });
 
+  test("the runtime waits for the child's answer before advancing the beat", () => {
+    const folder = workspace();
+
+    const result = buildPackage(folder);
+
+    expect(result.systemInstruction).toContain(
+      "Дождись ответа ребёнка на твой вопрос, прежде чем переходить к следующему этапу. Не переключай этап посреди своей же фразы.",
+    );
+  });
+
   test("omits the lesson section when no plan exists", () => {
     const folder = workspace();
     rmSync(join(folder, "plans/lesson-2026-10-01.md"));
