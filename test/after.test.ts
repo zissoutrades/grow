@@ -175,6 +175,31 @@ describe("after-loop", () => {
     });
   });
 
+  test("the plan-revision prompt forbids scripting wrong-answer corrections in both locales", async () => {
+    for (const locale of ["en", "ru"] as const) {
+      const fixturePaths = fixture();
+      const calls: ModelCall[] = [];
+
+      await runAfterLoop({
+        ...context(fixturePaths, fakeModel(PAYLOAD, calls)),
+        locale,
+      });
+
+      const system = calls[0].system ?? "";
+      if (locale === "en") {
+        expect(system).toContain(
+          "Never script the tutor's verbal response to a wrong answer in the plan",
+        );
+        expect(system).toContain(
+          "How to respond to a wrong answer is set by the tutor config (config/tutor.md, Method section)",
+        );
+      } else {
+        expect(system).toContain("Никогда не прописывай в плане словесную реакцию на неверный ответ");
+        expect(system).toContain("Как реагировать на ошибку, задаёт конфиг тьютора");
+      }
+    }
+  });
+
   test("the plan-revision prompt forbids counting warm-ups in both locales", async () => {
     for (const locale of ["en", "ru"] as const) {
       const fixturePaths = fixture();

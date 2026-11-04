@@ -284,6 +284,10 @@ describe("manager chat loop", () => {
     expect(fake.calls[1].system).toContain("методист");
     expect(fake.calls[1].prompt).toContain("Журнал сессии");
     expect(fake.calls[1].prompt).toContain("ребёнок справился");
+    // Same wrong-answer scripting ban as the after-loop's revision prompt.
+    expect(fake.calls[1].prompt).toContain(
+      "Никогда не прописывай в плане словесную реакцию на неверный ответ",
+    );
   });
 
   test("revise_plan does not clobber a plan the after-loop already wrote for the same date", async () => {
