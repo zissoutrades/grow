@@ -16,6 +16,7 @@ import canvasJs from "../ui/canvas.js" with { type: "text" };
 import consoleHtml from "../ui/console.html" with { type: "text" };
 import consoleJs from "../ui/console.js" with { type: "text" };
 import coreJs from "../ui/core.js" with { type: "text" };
+import localeJs from "../ui/locale.js" with { type: "text" };
 import proxyClientJs from "../ui/proxy-client.js" with { type: "text" };
 import styleCss from "../ui/style.css" with { type: "text" };
 import workletsJs from "../ui/worklets.js" with { type: "text" };
@@ -37,6 +38,7 @@ const ASSETS: Readonly<Record<string, UiAsset>> = {
   "canvas.js": { body: canvasJs, contentType: JS },
   "console.js": { body: consoleJs, contentType: JS },
   "core.js": { body: coreJs, contentType: JS },
+  "locale.js": { body: localeJs, contentType: JS },
   "proxy-client.js": { body: proxyClientJs, contentType: JS },
   "worklets.js": { body: workletsJs, contentType: JS },
   "style.css": { body: styleCss, contentType: CSS },

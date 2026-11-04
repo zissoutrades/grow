@@ -7,6 +7,7 @@ import {
   type TranscriptRole,
   type TurnEvent,
 } from "./gemini";
+import { currentLocale, type Locale } from "./locale";
 import { SessionLog } from "./log";
 import { buildPackage, type SessionPackage } from "./package";
 import type { TextModelFn } from "./text-model";
@@ -78,33 +79,70 @@ export const FAREWELL_IDLE_FALLBACK_MS = 3_000;
 /** How often a due retry/finalize re-checks while the tutor is still speaking. */
 const TUTOR_BUSY_RECHECK_MS = 500;
 
-export const CLOSE_INSTRUCTION = "Приблизься к финальному биту: рефлексия и прощание.";
+export interface SessionStrings {
+  readonly closeInstruction: string;
+  readonly greetingInstruction: string;
+  readonly greetingRetries: readonly [string, string];
+  readonly noResponseFarewell: string;
+  readonly childUnresponsiveNudge: string;
+}
+
+/**
+ * Session-level prompts that carry the tutor's language. Russian is the
+ * default; `en` is the demo locale (`GROW_LOCALE=en`), including the
+ * Cyrillic/Latin-only guard line in the greeting turn.
+ */
+const SESSION_STRINGS: Record<Locale, SessionStrings> = {
+  ru: {
+    closeInstruction: "Приблизься к финальному биту: рефлексия и прощание.",
+    greetingInstruction:
+      "Поздоровайся коротко по-русски и дождись ответа ребёнка; первый бит начинай только после того, как ребёнок ответит.",
+    greetingRetries: [
+      "Ребёнок пока не ответил. Коротко спроси по-русски: «Ты меня слышишь?»",
+      "Ребёнок всё ещё не отвечает. Ещё раз коротко спроси по-русски: «Ты меня слышишь?»",
+    ],
+    noResponseFarewell:
+      "Скажи ребёнку по-русски: «Кажется, ты меня не слышишь. Завершаю занятие — перезапусти, когда будешь готов(а).»",
+    childUnresponsiveNudge:
+      "Ребёнок давно молчит. Коротко спроси по-русски: «Ты здесь? Если тебя нет — я завершу занятие.»",
+  },
+  en: {
+    closeInstruction: "Move toward the final beat: reflection and goodbye.",
+    greetingInstruction:
+      "Greet the child warmly and ask their name; wait for the child's answer — start the first beat only after the child responds.",
+    greetingRetries: [
+      "The child has not answered yet. Ask briefly in English: “Can you hear me?”",
+      "The child still isn't answering. Ask once more, briefly: “Can you hear me?”",
+    ],
+    noResponseFarewell:
+      "Say to the child in English: “I don't think you can hear me. I'll end the session — start again when you're ready.”",
+    childUnresponsiveNudge:
+      "The child has been quiet for a while. Ask briefly: “Are you there? If not, I'll end the session.”",
+  },
+};
+
+/** The session prompts for one locale (pure; used by the demo-locale tests). */
+export function sessionStrings(locale: Locale): SessionStrings {
+  return SESSION_STRINGS[locale];
+}
+
+/** The Russian defaults, kept as exports for existing callers and tests. */
+export const CLOSE_INSTRUCTION = SESSION_STRINGS.ru.closeInstruction;
 
 /**
  * Start failsafe (owner spec U10.1, refined by U13.1). The tutor greets first,
  * but says only hello and waits: the first beat starts only after the child
  * answers (the model's own flow), never immediately after the greeting.
  */
-export const GREETING_INSTRUCTION =
-  "Поздоровайся коротко по-русски и дождись ответа ребёнка; первый бит начинай только после того, как ребёнок ответит.";
+export const GREETING_INSTRUCTION = SESSION_STRINGS.ru.greetingInstruction;
 
-export const GREETING_RETRY_INSTRUCTIONS = [
-  "Ребёнок пока не ответил. Коротко спроси по-русски: «Ты меня слышишь?»",
-  "Ребёнок всё ещё не отвечает. Ещё раз коротко спроси по-русски: «Ты меня слышишь?»",
-] as const;
+export const GREETING_RETRY_INSTRUCTIONS = SESSION_STRINGS.ru.greetingRetries;
 
-export const NO_RESPONSE_FAREWELL =
-  "Скажи ребёнку по-русски: «Кажется, ты меня не слышишь. Завершаю занятие — перезапусти, когда будешь готов(а).»";
+export const NO_RESPONSE_FAREWELL = SESSION_STRINGS.ru.noResponseFarewell;
 
-/**
- * Mid-session silence nudge (U14.1). One nudge per silence episode: if the
- * child still does not answer, the session closes gracefully with
- * `child_unresponsive` instead of repeating the prompt.
- */
-export const CHILD_UNRESPONSIVE_NUDGE =
-  "Ребёнок давно молчит. Коротко спроси по-русски: «Ты здесь? Если тебя нет — я завершу занятие.»";
+export const CHILD_UNRESPONSIVE_NUDGE = SESSION_STRINGS.ru.childUnresponsiveNudge;
 
-const GREETING_MAX_RETRIES = GREETING_RETRY_INSTRUCTIONS.length;
+const GREETING_MAX_RETRIES = SESSION_STRINGS.ru.greetingRetries.length;
 
 const TOKENS_PER_AUDIO_SECOND = 25;
 const RATES_USD_PER_MILLION = {
@@ -679,6 +717,8 @@ export interface SessionSnapshot {
 export interface SessionOptions {
   readonly workspacePath: string;
   readonly apiKey: string;
+  /** Demo locale; defaults to the proxy's `GROW_LOCALE` (Russian when unset). */
+  readonly locale?: Locale;
   readonly clock?: Clock;
   readonly durations?: Partial<SessionDurations>;
   readonly model?: string;
@@ -740,6 +780,8 @@ export class Session {
   readonly workspacePath: string;
 
   private readonly apiKey: string;
+  private readonly locale: Locale;
+  private readonly strings: SessionStrings;
   private readonly clock: Clock;
   private readonly durations: SessionDurations;
   private readonly model: string | undefined;
@@ -776,6 +818,8 @@ export class Session {
   constructor(options: SessionOptions) {
     this.workspacePath = options.workspacePath;
     this.apiKey = options.apiKey;
+    this.locale = options.locale ?? currentLocale();
+    this.strings = sessionStrings(this.locale);
     this.clock = options.clock ?? systemClock;
     this.durations = { ...DEFAULT_DURATIONS, ...options.durations };
     this.model = options.model;
@@ -802,7 +846,7 @@ export class Session {
       throw new SessionError(`cannot start a session in state ${this.state}`);
     }
     this.state = "starting";
-    this.pkg = buildPackage(this.workspacePath);
+    this.pkg = buildPackage(this.workspacePath, this.locale);
     this.log = SessionLog.create(this.workspacePath);
     this.log.append("session_start", {
       sessionId: this.log.sessionId,
@@ -880,7 +924,7 @@ export class Session {
     this.timers?.noteChildInput();
     let text: string;
     try {
-      text = formatChildAction(action);
+      text = formatChildAction(action, this.locale);
     } catch (error) {
       const message = errorMessage(error);
       this.log.append("child_action", { action: action.kind, value: action.value, error: message });
@@ -1018,6 +1062,7 @@ export class Session {
       model: this.model ?? "models/gemini-3.8-live",
       voiceName: this.voiceName ?? "Kore",
       systemInstruction: pkg.systemInstruction,
+      locale: this.locale,
       callbacks,
     });
   }
@@ -1204,8 +1249,8 @@ export class Session {
       return;
     }
     try {
-      this.sendTextTurn(CLOSE_INSTRUCTION, "close");
-      this.client?.sendJson({ type: "inject", text: CLOSE_INSTRUCTION });
+      this.sendTextTurn(this.strings.closeInstruction, "close");
+      this.client?.sendJson({ type: "inject", text: this.strings.closeInstruction });
     } catch (error) {
       const message = errorMessage(error);
       this.log.append("turn_event", { event: "error", phase: "inject", message });
@@ -1226,7 +1271,7 @@ export class Session {
     }
     this.greetingSent = true;
     try {
-      this.sendTextTurn(GREETING_INSTRUCTION, "greeting");
+      this.sendTextTurn(this.strings.greetingInstruction, "greeting");
       this.timers?.armGreetingWatchdog();
       // The mid-session watchdog starts counting only once this greeting turn
       // has settled; the greeting failsafe still owns the no-response case.
@@ -1240,17 +1285,17 @@ export class Session {
 
   private injectGreetingRetry(attempt: number): void {
     const text =
-      GREETING_RETRY_INSTRUCTIONS[attempt - 1] ?? GREETING_RETRY_INSTRUCTIONS[0];
+      this.strings.greetingRetries[attempt - 1] ?? this.strings.greetingRetries[0];
     this.injectFailsafe(text);
   }
 
   private injectNoResponseFarewell(): void {
-    this.injectFailsafe(NO_RESPONSE_FAREWELL);
+    this.injectFailsafe(this.strings.noResponseFarewell);
   }
 
   /** One mid-session "are you there?" nudge per silence episode (U14.1). */
   private injectChildUnresponsiveNudge(): void {
-    this.injectFailsafe(CHILD_UNRESPONSIVE_NUDGE);
+    this.injectFailsafe(this.strings.childUnresponsiveNudge);
   }
 
   private injectFailsafe(text: string): void {
@@ -1351,6 +1396,7 @@ export class Session {
         sessionFolder: log.folder,
         workspacePath: this.workspacePath,
         reason,
+        locale: this.locale,
         generateText: this.textModel,
       });
       this.afterStatus = result.status;

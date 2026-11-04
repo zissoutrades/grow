@@ -1,5 +1,7 @@
 /** Tool declarations and pure execution for the Grow tutor session. */
 
+import { currentLocale, type Locale } from "./locale";
+
 export const BEAT_IDS = [
   "recall",
   "present",
@@ -83,124 +85,191 @@ export interface ChildAction {
   readonly value: unknown;
 }
 
+interface ToolCopy {
+  readonly advanceBeat: string;
+  readonly beatId: string;
+  readonly outcome: string;
+  readonly showTenFrame: string;
+  readonly filled: string;
+  readonly fillFrame: string;
+  readonly index: string;
+  readonly showNumberLine: string;
+  readonly min: string;
+  readonly max: string;
+  readonly marker: string;
+  readonly showChoiceCards: string;
+  readonly showText: string;
+  readonly text: string;
+  readonly consultPlanner: string;
+  readonly question: string;
+}
+
+const TOOL_COPY: Record<Locale, ToolCopy> = {
+  ru: {
+    advanceBeat: "Отметь переход к следующему этапу урока. Вызывай при каждом переходе.",
+    beatId: "Этап урока.",
+    outcome: "Как прошёл этап.",
+    showTenFrame: "Показать на холсте тен-фрейм с заполненными слева направо клетками.",
+    filled: "Сколько клеток заполнено (0–10).",
+    fillFrame: "Заполнить одну клетку тен-фрейма на холсте.",
+    index: "Индекс клетки от 0 до 9.",
+    showNumberLine: "Показать числовую прямую с маркером.",
+    min: "Левая граница.",
+    max: "Правая граница.",
+    marker: "Позиция маркера или null.",
+    showChoiceCards: "Показать карточки с вариантами ответа (2–4 штуки).",
+    showText: "Показать короткий текст на холсте.",
+    text: "Текст для холста.",
+    consultPlanner: "Спросить планировщика (в демо недоступен).",
+    question: "Вопрос планировщику.",
+  },
+  en: {
+    advanceBeat: "Mark a transition to the next lesson beat. Call it at every transition.",
+    beatId: "Lesson beat.",
+    outcome: "How the beat went.",
+    showTenFrame: "Show a ten-frame on the canvas with cells filled left to right.",
+    filled: "How many cells are filled (0–10).",
+    fillFrame: "Fill one cell of the ten-frame on the canvas.",
+    index: "Cell index from 0 to 9.",
+    showNumberLine: "Show a number line with a marker.",
+    min: "Left end.",
+    max: "Right end.",
+    marker: "Marker position, or null.",
+    showChoiceCards: "Show answer choice cards (2–4).",
+    showText: "Show a short text on the canvas.",
+    text: "Text for the canvas.",
+    consultPlanner: "Ask the planner (unavailable in the demo).",
+    question: "Question for the planner.",
+  },
+};
+
 /** Gemini function declarations (PROTOCOL §5). */
-export const TOOL_DECLARATIONS = [
-  {
-    name: "advance_beat",
-    description:
-      "Отметь переход к следующему этапу урока. Вызывай при каждом переходе.",
-    parameters: {
-      type: "OBJECT",
-      properties: {
-        beatId: {
-          type: "STRING",
-          enum: [...BEAT_IDS],
-          description: "Этап урока.",
-        },
-        outcome: {
-          type: "STRING",
-          enum: [...BEAT_OUTCOMES],
-          description: "Как прошёл этап.",
-        },
-      },
-      required: ["beatId", "outcome"],
-    },
-  },
-  {
-    name: "show_ten_frame",
-    description: "Показать на холсте тен-фрейм с заполненными слева направо клетками.",
-    parameters: {
-      type: "OBJECT",
-      properties: {
-        filled: {
-          type: "INTEGER",
-          minimum: 0,
-          maximum: 10,
-          description: "Сколько клеток заполнено (0–10).",
-        },
-      },
-      required: ["filled"],
-    },
-  },
-  {
-    name: "fill_frame",
-    description: "Заполнить одну клетку тен-фрейма на холсте.",
-    parameters: {
-      type: "OBJECT",
-      properties: {
-        index: {
-          type: "INTEGER",
-          minimum: 0,
-          maximum: 9,
-          description: "Индекс клетки от 0 до 9.",
-        },
-      },
-      required: ["index"],
-    },
-  },
-  {
-    name: "show_number_line",
-    description: "Показать числовую прямую с маркером.",
-    parameters: {
-      type: "OBJECT",
-      properties: {
-        min: { type: "NUMBER", description: "Левая граница." },
-        max: { type: "NUMBER", description: "Правая граница." },
-        marker: {
-          type: "NUMBER",
-          nullable: true,
-          description: "Позиция маркера или null.",
-        },
-      },
-      required: ["min", "max", "marker"],
-    },
-  },
-  {
-    name: "show_choice_cards",
-    description: "Показать карточки с вариантами ответа (2–4 штуки).",
-    parameters: {
-      type: "OBJECT",
-      properties: {
-        cards: {
-          type: "ARRAY",
-          minItems: "2",
-          maxItems: "4",
-          items: {
-            type: "OBJECT",
-            properties: {
-              id: { type: "STRING" },
-              label: { type: "STRING" },
-            },
-            required: ["id", "label"],
+function buildDeclarations(copy: ToolCopy) {
+  return [
+    {
+      name: "advance_beat",
+      description: copy.advanceBeat,
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          beatId: {
+            type: "STRING",
+            enum: [...BEAT_IDS],
+            description: copy.beatId,
+          },
+          outcome: {
+            type: "STRING",
+            enum: [...BEAT_OUTCOMES],
+            description: copy.outcome,
           },
         },
+        required: ["beatId", "outcome"],
       },
-      required: ["cards"],
     },
-  },
-  {
-    name: "show_text",
-    description: "Показать короткий текст на холсте.",
-    parameters: {
-      type: "OBJECT",
-      properties: {
-        text: { type: "STRING", description: "Текст для холста." },
+    {
+      name: "show_ten_frame",
+      description: copy.showTenFrame,
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          filled: {
+            type: "INTEGER",
+            minimum: 0,
+            maximum: 10,
+            description: copy.filled,
+          },
+        },
+        required: ["filled"],
       },
-      required: ["text"],
     },
-  },
-  {
-    name: "consult_planner",
-    description: "Спросить планировщика (в демо недоступен).",
-    parameters: {
-      type: "OBJECT",
-      properties: {
-        question: { type: "STRING", description: "Вопрос планировщику." },
+    {
+      name: "fill_frame",
+      description: copy.fillFrame,
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          index: {
+            type: "INTEGER",
+            minimum: 0,
+            maximum: 9,
+            description: copy.index,
+          },
+        },
+        required: ["index"],
       },
-      required: ["question"],
     },
-  },
-] as const;
+    {
+      name: "show_number_line",
+      description: copy.showNumberLine,
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          min: { type: "NUMBER", description: copy.min },
+          max: { type: "NUMBER", description: copy.max },
+          marker: {
+            type: "NUMBER",
+            nullable: true,
+            description: copy.marker,
+          },
+        },
+        required: ["min", "max", "marker"],
+      },
+    },
+    {
+      name: "show_choice_cards",
+      description: copy.showChoiceCards,
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          cards: {
+            type: "ARRAY",
+            minItems: "2",
+            maxItems: "4",
+            items: {
+              type: "OBJECT",
+              properties: {
+                id: { type: "STRING" },
+                label: { type: "STRING" },
+              },
+              required: ["id", "label"],
+            },
+          },
+        },
+        required: ["cards"],
+      },
+    },
+    {
+      name: "show_text",
+      description: copy.showText,
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          text: { type: "STRING", description: copy.text },
+        },
+        required: ["text"],
+      },
+    },
+    {
+      name: "consult_planner",
+      description: copy.consultPlanner,
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          question: { type: "STRING", description: copy.question },
+        },
+        required: ["question"],
+      },
+    },
+  ] as const;
+}
+
+/** Russian declarations: the default kept as an export for existing callers. */
+export const TOOL_DECLARATIONS = buildDeclarations(TOOL_COPY.ru);
+
+/** Declarations whose descriptions follow the demo locale. */
+export function toolDeclarations(locale: Locale = currentLocale()) {
+  return buildDeclarations(TOOL_COPY[locale]);
+}
 
 /**
  * Execute one upstream tool call. Pure: callers log the call/result and emit
@@ -272,24 +341,36 @@ export function executeToolCall(call: FunctionCall): ToolExecution {
   }
 }
 
+const CHILD_ACTION_WORDS: Record<
+  Locale,
+  { readonly prefix: string; readonly card: string; readonly cell: string; readonly number: string }
+> = {
+  ru: { prefix: "[canvas] ребёнок нажал: ", card: "карточка", cell: "клетка", number: "число" },
+  en: { prefix: "[canvas] child tapped: ", card: "card", cell: "cell", number: "number" },
+};
+
 /**
  * Render a child's canvas action as the text turn the tutor sees
  * (PROTOCOL §2). The value shapes are intentionally tolerant: U2 may send a
  * string label, a number, or `{id,label}` / `{index}`.
  */
-export function formatChildAction(action: ChildAction): string {
+export function formatChildAction(
+  action: ChildAction,
+  locale: Locale = currentLocale(),
+): string {
+  const words = CHILD_ACTION_WORDS[locale];
   switch (action.kind) {
     case "choice": {
       const label = choiceLabel(action.value);
-      return `[canvas] ребёнок нажал: карточка ${label}`;
+      return `${words.prefix}${words.card} ${label}`;
     }
     case "tenframe": {
       const index = fieldNumber(action.value, "index");
-      return `[canvas] ребёнок нажал: клетка ${index + 1}`;
+      return `${words.prefix}${words.cell} ${index + 1}`;
     }
     case "numberline": {
       const value = fieldNumber(action.value, "value");
-      return `[canvas] ребёнок нажал: число ${value}`;
+      return `${words.prefix}${words.number} ${value}`;
     }
   }
 }

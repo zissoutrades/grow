@@ -14,6 +14,8 @@
 // parent can open a folder before any child session exists; the proxy also
 // falls back to the last session folder or GROW_WORKSPACE.
 
+import { applyDocument, loadLocale, t } from "./locale.js";
+
 const WORKSPACE_STORAGE_KEY = "grow.consoleWorkspace";
 const RECENTS_URL = "/api/workspaces/recent";
 const STATE_POLL_MS = 2000;
@@ -142,7 +144,7 @@ async function api(path, options = {}) {
   }
   if (!response.ok) {
     const message =
-      typeof payload.error === "string" ? payload.error : `ошибка ${response.status}`;
+      typeof payload.error === "string" ? payload.error : t("console.error", { status: response.status });
     throw new Error(message);
   }
   return payload;
@@ -155,7 +157,7 @@ function setStatus(text, tone = "info") {
 
 function ensureWorkspace() {
   if (workspace().length === 0) {
-    setStatus("Укажите папку занятия.", "error");
+    setStatus(t("console.workspaceRequired"), "error");
     els.workspaceInput.focus();
     return false;
   }
@@ -175,14 +177,16 @@ function appendChat(role, text, actions = []) {
 
   const label = document.createElement("span");
   label.className = "chat-label";
-  label.textContent = role === "user" ? "Родитель" : "Менеджер";
+  label.textContent = role === "user" ? t("console.roleParent") : t("console.roleManager");
   message.appendChild(label);
   message.appendChild(document.createTextNode(text));
 
   if (actions.length > 0) {
     const tools = document.createElement("span");
     tools.className = "chat-actions";
-    tools.textContent = `инструменты: ${actions.map((action) => action.tool).join(", ")}`;
+    tools.textContent = t("console.tools", {
+      list: actions.map((action) => action.tool).join(", "),
+    });
     message.appendChild(tools);
   }
 
@@ -193,7 +197,7 @@ function appendChat(role, text, actions = []) {
 function setBusy(busy) {
   state.busy = busy;
   els.chatSend.disabled = busy;
-  els.chatSend.textContent = busy ? "Думает…" : "Отправить";
+  els.chatSend.textContent = busy ? t("console.thinking") : t("console.send");
 }
 
 async function sendChat(event) {
@@ -206,12 +210,12 @@ async function sendChat(event) {
   appendChat("user", message);
   els.chatInput.value = "";
   setBusy(true);
-  setStatus("Менеджер думает…");
+  setStatus(t("console.thinkingStatus"));
 
   try {
     const result = await api("/api/console/chat", { method: "POST", body: { message } });
     const actions = Array.isArray(result.actions) ? result.actions : [];
-    appendChat("manager", String(result.reply ?? "Готово."), actions);
+    appendChat("manager", String(result.reply ?? t("console.done")), actions);
 
     const changed = actions.find(
       (action) =>
@@ -228,11 +232,11 @@ async function sendChat(event) {
     }
     await refreshConfig();
     await refreshFiles();
-    setStatus("Готово.", "ok");
+    setStatus(t("console.done"), "ok");
   } catch (error) {
     const messageText = error instanceof Error ? error.message : String(error);
-    setStatus(`Ошибка: ${messageText}`, "error");
-    appendChat("manager", `Не удалось выполнить: ${messageText}`);
+    setStatus(t("console.errorPrefix", { message: messageText }), "error");
+    appendChat("manager", t("console.chatFailed", { message: messageText }));
   } finally {
     setBusy(false);
     els.chatInput.focus();
@@ -252,7 +256,7 @@ function selectConfig(file) {
   els.configEditor.value = state.config[file] ?? "";
   els.configEditor.readOnly = readOnly;
   els.configSave.disabled = readOnly;
-  els.configHint.textContent = readOnly ? "только чтение" : "";
+  els.configHint.textContent = readOnly ? t("console.readOnly") : "";
 }
 
 async function refreshConfig() {
@@ -274,7 +278,7 @@ async function saveConfig() {
   if (path === undefined || state.busy) {
     return;
   }
-  setStatus("Сохраняем конфигурацию…");
+  setStatus(t("console.savingConfig"));
   try {
     const result = await api("/api/console/config", {
       method: "POST",
@@ -283,10 +287,12 @@ async function saveConfig() {
     state.config[state.configFile] = els.configEditor.value;
     state.configDirty = false;
     showDiff(typeof result.diff === "string" ? result.diff : "");
-    setStatus("Конфигурация сохранена.", "ok");
+    setStatus(t("console.savedConfig"), "ok");
   } catch (error) {
     setStatus(
-      `Не удалось сохранить: ${error instanceof Error ? error.message : String(error)}`,
+      t("console.saveFailed", {
+        message: error instanceof Error ? error.message : String(error),
+      }),
       "error",
     );
   }
@@ -297,7 +303,7 @@ function renderPresets() {
   if (state.config.presets.length === 0) {
     const empty = document.createElement("p");
     empty.className = "preset-empty";
-    empty.textContent = "Пресетов нет.";
+    empty.textContent = t("console.noPresets");
     els.presetList.appendChild(empty);
     return;
   }
@@ -317,16 +323,18 @@ async function applyPreset(name) {
   if (!ensureWorkspace() || state.busy) {
     return;
   }
-  setStatus(`Применяем пресет «${name.replace(/\.md$/i, "")}»…`);
+  setStatus(t("console.applyingPreset", { name: name.replace(/\.md$/i, "") }));
   try {
     const result = await api("/api/console/preset", { method: "POST", body: { name } });
     showDiff(typeof result.diff === "string" ? result.diff : "");
     state.configDirty = false;
     await refreshConfig();
-    setStatus(`Пресет «${name.replace(/\.md$/i, "")}» применён.`, "ok");
+    setStatus(t("console.presetApplied", { name: name.replace(/\.md$/i, "") }), "ok");
   } catch (error) {
     setStatus(
-      `Не удалось применить пресет: ${error instanceof Error ? error.message : String(error)}`,
+      t("console.presetFailed", {
+        message: error instanceof Error ? error.message : String(error),
+      }),
       "error",
     );
   }
@@ -357,7 +365,7 @@ function showDiff(diff) {
   if (typeof diff !== "string" || diff.length === 0) {
     const empty = document.createElement("p");
     empty.className = "side-empty";
-    empty.textContent = "Изменений нет.";
+    empty.textContent = t("console.noChangesInline");
     els.sideDiff.appendChild(empty);
     return;
   }
@@ -414,7 +422,7 @@ function renderSideFile(view) {
   if (entry === null) {
     const empty = document.createElement("p");
     empty.className = "side-empty";
-    empty.textContent = "Файл не найден.";
+    empty.textContent = t("console.fileNotFound");
     els.sideMd.appendChild(empty);
     return;
   }
@@ -529,26 +537,26 @@ async function closeSession() {
   if (sessionId === null) {
     return;
   }
-  const confirmed = window.confirm(
-    `Завершить занятие ${sessionId}? Ребёнок больше не сможет его продолжить.`,
-  );
+  const confirmed = window.confirm(t("console.closeConfirm", { id: sessionId }));
   if (!confirmed) {
     return;
   }
 
   els.closeSession.disabled = true;
-  setStatus("Завершаем занятие…");
+  setStatus(t("console.ending"));
   try {
     const result = await api("/api/close", {
       method: "POST",
       body: { sessionId, reason: "parent_console" },
     });
-    setStatus(`Занятие завершено: ${String(result.sessionFolder ?? sessionId)}`, "ok");
+    setStatus(t("console.ended", { folder: String(result.sessionFolder ?? sessionId) }), "ok");
     await refreshState();
     await refreshFiles();
   } catch (error) {
     setStatus(
-      `Не удалось завершить занятие: ${error instanceof Error ? error.message : String(error)}`,
+      t("console.endFailed", {
+        message: error instanceof Error ? error.message : String(error),
+      }),
       "error",
     );
   } finally {
@@ -562,15 +570,17 @@ async function refreshAll() {
   if (!ensureWorkspace()) {
     return;
   }
-  setStatus("Читаем папку…");
+  setStatus(t("console.reading"));
   try {
     await refreshState();
     await refreshConfig();
     await refreshFiles();
-    setStatus("Папка открыта.", "ok");
+    setStatus(t("console.opened"), "ok");
   } catch (error) {
     setStatus(
-      `Ошибка: ${error instanceof Error ? error.message : String(error)}`,
+      t("console.errorPrefix", {
+        message: error instanceof Error ? error.message : String(error),
+      }),
       "error",
     );
   }
@@ -623,6 +633,9 @@ els.closeSession.addEventListener("click", () => void closeSession());
 
 selectConfig("tutor");
 void (async () => {
+  await loadLocale();
+  applyDocument();
+  selectConfig(state.configFile);
   await loadRecents();
   try {
     await refreshState();
@@ -632,7 +645,7 @@ void (async () => {
   if (workspace().length > 0) {
     await refreshAll();
   } else {
-    setStatus("Укажите папку занятия, чтобы открыть консоль.", "info");
+    setStatus(t("console.openPrompt"), "info");
   }
   setInterval(() => void pollState(), STATE_POLL_MS);
 })();

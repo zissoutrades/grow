@@ -17,6 +17,7 @@ import {
   GREETING_RETRY_INSTRUCTIONS,
   NO_RESPONSE_FAREWELL,
   Session,
+  sessionStrings,
   type ClientSink,
   type SessionGemini,
   type SessionGeminiCallbacks,
@@ -91,6 +92,7 @@ async function startSession(
     greetingRetryMs: number;
     farewellGraceMs: number;
   }> = {},
+  locale?: "ru" | "en",
 ): Promise<Harness> {
   const clock = new FakeClock();
   let gemini: FakeGemini | null = null;
@@ -98,6 +100,7 @@ async function startSession(
   const session = new Session({
     workspacePath,
     apiKey: "test-key",
+    locale,
     clock,
     durations,
     geminiFactory: (callbacks) => {
@@ -518,3 +521,32 @@ function readJournal(path: string): Array<Record<string, unknown>> {
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
+
+describe("demo locale", () => {
+  test("the English session prompts carry no Cyrillic", () => {
+    const strings = sessionStrings("en");
+
+    expect(strings.greetingInstruction).toContain("wait for the child's answer");
+    expect(strings.greetingRetries).toHaveLength(2);
+    expect(strings.noResponseFarewell).toContain("I'll end the session");
+    expect(strings.childUnresponsiveNudge).toContain("Are you there?");
+    expect(strings.closeInstruction).toContain("reflection and goodbye");
+    for (const text of [
+      strings.greetingInstruction,
+      strings.greetingRetries[0],
+      strings.greetingRetries[1],
+      strings.noResponseFarewell,
+      strings.childUnresponsiveNudge,
+      strings.closeInstruction,
+    ]) {
+      expect(text).not.toMatch(/[А-Яа-яЁё]/);
+    }
+  });
+
+  test("a session started with the en locale greets in English", async () => {
+    const harness = await startSession({}, "en");
+
+    expect(harness.gemini.sentTexts[0]).toBe(sessionStrings("en").greetingInstruction);
+    expect(harness.gemini.sentTexts[0]).not.toContain("Поздоровайся");
+  });
+});

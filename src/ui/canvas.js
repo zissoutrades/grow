@@ -1,6 +1,7 @@
 // Canvas rendering. Pure state lives in core.js; this module only turns state
 // into DOM and reports taps back to app.js.
 import { MAX_TEXT_BLOCKS, numberLineTicks } from "./core.js";
+import { t } from "./locale.js";
 
 function formatNumber(value) {
   return Number.isInteger(value) ? String(value) : String(Math.round(value * 10) / 10);
@@ -37,7 +38,7 @@ export function createCanvasView({
     }
 
     const filledCount = tenframe.cells.filter(Boolean).length;
-    tenframeCaption.textContent = `заполнено: ${filledCount} из 10`;
+    tenframeCaption.textContent = t("canvas.filled", { filled: filledCount });
 
     tenframe.cells.forEach((filled, index) => {
       const cell = document.createElement("button");
@@ -45,7 +46,9 @@ export function createCanvasView({
       cell.className = filled ? "tenframe-cell filled" : "tenframe-cell";
       cell.setAttribute(
         "aria-label",
-        filled ? `клетка ${index + 1}, заполнена` : `клетка ${index + 1}`,
+        filled
+          ? t("canvas.cellFilled", { index: index + 1 })
+          : t("canvas.cell", { index: index + 1 }),
       );
       cell.addEventListener("click", () => onTenFrameTap(index));
       tenframeGrid.appendChild(cell);
@@ -63,8 +66,15 @@ export function createCanvasView({
     numberline.setAttribute(
       "aria-label",
       marker === null
-        ? `числовая прямая от ${formatNumber(min)} до ${formatNumber(max)}`
-        : `числовая прямая от ${formatNumber(min)} до ${formatNumber(max)}, отметка ${formatNumber(marker)}`,
+        ? t("canvas.numberlineRange", {
+            min: formatNumber(min),
+            max: formatNumber(max),
+          })
+        : t("canvas.numberlineMarker", {
+            min: formatNumber(min),
+            max: formatNumber(max),
+            marker: formatNumber(marker),
+          }),
     );
 
     const axis = document.createElement("div");

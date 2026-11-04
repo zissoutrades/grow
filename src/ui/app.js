@@ -14,6 +14,7 @@ import {
   selectChoice,
   tapTenFrame,
 } from "./core.js";
+import { applyDocument, loadLocale, t } from "./locale.js";
 
 const WORKLET_URL = new URL("./worklets.js", import.meta.url).href;
 const WORKSPACE_STORAGE_KEY = "grow.workspacePath";
@@ -29,23 +30,19 @@ const CLOSE_REENABLE_MS = 20_000;
 /** Empty playback buffer this long after turn_complete = audio really ended. */
 const PLAYBACK_IDLE_DEBOUNCE_MS = 300;
 
-const BEAT_LABELS = {
-  recall: "вспоминаем",
-  present: "объясняем",
-  attempt: "пробуем",
-  diagnose: "разбираемся",
-  repair: "исправляем",
-  extend: "расширяем",
-  consolidate: "закрепляем",
-  reflect: "подводим итог",
-  close: "прощаемся",
-};
+const BEAT_IDS = [
+  "recall",
+  "present",
+  "attempt",
+  "diagnose",
+  "repair",
+  "extend",
+  "consolidate",
+  "reflect",
+  "close",
+];
 
-const OUTCOME_LABELS = {
-  ok: "ок",
-  struggle: "трудно",
-  skip: "пропуск",
-};
+const OUTCOME_IDS = ["ok", "struggle", "skip"];
 
 function must(id) {
   const element = document.getElementById(id);
@@ -155,18 +152,27 @@ function armCloseGuard() {
     }
     state.closing = false;
     setCloseEnabled(true);
-    setStatus("Завершение затянулось. Попробуйте ещё раз.", "error");
+    setStatus(t("status.closeTimeout"), "error");
   }, CLOSE_REENABLE_MS);
+}
+
+function beatLabel(id) {
+  return BEAT_IDS.includes(id) ? t(`beat.${id}`) : id;
+}
+
+function outcomeLabel(id) {
+  return OUTCOME_IDS.includes(id) ? t(`outcome.${id}`) : id;
 }
 
 function renderBeat() {
   if (state.beat === null) {
-    beatEl.textContent = "этап: —";
+    beatEl.textContent = t("beat.none");
     return;
   }
-  const beatLabel = BEAT_LABELS[state.beat.beatId] ?? state.beat.beatId;
-  const outcomeLabel = OUTCOME_LABELS[state.beat.outcome] ?? state.beat.outcome;
-  beatEl.textContent = `этап: ${beatLabel} · ${outcomeLabel}`;
+  beatEl.textContent = t("beat.line", {
+    label: beatLabel(state.beat.beatId),
+    outcome: outcomeLabel(state.beat.outcome),
+  });
 }
 
 function renderTranscript() {
@@ -186,7 +192,7 @@ function renderTranscript() {
   if (fragment.childNodes.length === 0) {
     const placeholder = document.createElement("p");
     placeholder.className = "transcript-empty";
-    placeholder.textContent = "Пока тихо…";
+    placeholder.textContent = t("transcript.empty");
     fragment.appendChild(placeholder);
   }
 
@@ -200,7 +206,7 @@ function transcriptLine(role, text, partial) {
 
   const label = document.createElement("span");
   label.className = "transcript-label";
-  label.textContent = role === "child" ? "Ребёнок" : "Тьютор";
+  label.textContent = role === "child" ? t("transcript.child") : t("transcript.tutor");
 
   const body = document.createElement("span");
   body.className = "transcript-text";
@@ -232,7 +238,7 @@ function stopClock() {
 
 async function openAudio() {
   if (typeof AudioContext === "undefined") {
-    throw new Error("браузер не поддерживает Web Audio");
+    throw new Error(t("audio.webAudio"));
   }
 
   const captureCtx = new AudioContext({ latencyHint: "interactive" });
@@ -241,7 +247,7 @@ async function openAudio() {
 
   try {
     if (captureCtx.audioWorklet === undefined || playbackCtx.audioWorklet === undefined) {
-      throw new Error("браузер не поддерживает AudioWorklet");
+      throw new Error(t("audio.worklet"));
     }
 
     await Promise.all([
@@ -469,7 +475,12 @@ function handleEvent(message) {
       handleAfter(message);
       break;
     case "error":
-      setStatus(`Ошибка прокси: ${String(message.message ?? "неизвестная")}`, "error");
+      setStatus(
+        t("status.proxyError", {
+          message: String(message.message ?? t("status.proxyUnknown")),
+        }),
+        "error",
+      );
       break;
     default:
       // `inject` is sent by U1 but is not part of PROTOCOL §2; ignore it.
@@ -493,16 +504,13 @@ function handleSessionSaved(message) {
   showScreen("closed");
   newSessionButton.disabled = !state.afterFinal;
   if (!state.afterFinal) {
-    setAfterStatus("после сессии: идёт обработка…");
+    setAfterStatus(t("after.processing"));
     startAfterPolling();
   }
   if (failed) {
-    setStatus(
-      "Занятие не состоялось: ребёнок не ответил. Перезапустите, когда будете готовы.",
-      "error",
-    );
+    setStatus(t("status.sessionFailed"), "error");
   } else {
-    setStatus("Сессия сохранена.", "ok");
+    setStatus(t("status.saved"), "ok");
   }
   console.info(`session saved: ${String(message.sessionId ?? state.sessionId ?? "")}`);
 }
@@ -518,7 +526,7 @@ function handleAfter(message) {
 
   if (status === "running") {
     state.afterFinal = false;
-    setAfterStatus("после сессии: идёт обработка…");
+    setAfterStatus(t("after.processing"));
     newSessionButton.disabled = true;
     return;
   }
@@ -526,16 +534,16 @@ function handleAfter(message) {
   state.afterFinal = true;
   stopAfterPolling();
   if (status === "skipped") {
-    setAfterStatus("после сессии: пропущено — занятие не состоялось", true);
+    setAfterStatus(t("after.skipped"), true);
     newSessionButton.disabled = false;
     return;
   }
   if (status === "done") {
-    const suffix = written.length > 0 ? ` (${written.join(", ")})` : "";
-    setAfterStatus(`после сессии: готово${suffix}`);
+    const details = written.length > 0 ? ` (${written.join(", ")})` : "";
+    setAfterStatus(t("after.done", { details }));
     newSessionButton.disabled = false;
   } else {
-    setAfterStatus("после сессии: ошибка", true);
+    setAfterStatus(t("after.error"), true);
     newSessionButton.disabled = false;
   }
 }
@@ -584,7 +592,7 @@ async function pollAfter() {
   if (!state.afterFinal && state.pollAttempts >= AFTER_POLL_LIMIT) {
     stopAfterPolling();
     if (!state.saved) {
-      returnToLanding("Не удалось подтвердить сохранение сессии.", "error");
+      returnToLanding(t("status.confirmFailed"), "error");
     }
   }
 }
@@ -646,7 +654,7 @@ function resetSessionUi() {
   renderTranscript();
   renderBeat();
   setClock("00:00");
-  setAfterStatus("после сессии: —");
+  setAfterStatus(t("after.idle"));
   newSessionButton.disabled = true;
   // A previous session disabled this on save; a live session must always be
   // closeable from the child UI (U14.2).
@@ -660,13 +668,13 @@ async function startSession() {
   }
   const workspacePath = workspaceInput.value.trim();
   if (workspacePath.length === 0) {
-    setStatus("Укажите путь к папке занятия.", "error");
+    setStatus(t("status.workspaceRequired"), "error");
     return;
   }
 
   localStorage.setItem(WORKSPACE_STORAGE_KEY, workspacePath);
   startButton.disabled = true;
-  setStatus("Разрешаем микрофон…");
+  setStatus(t("status.mic"));
 
   resetSessionUi();
   state.sessionId = null;
@@ -675,7 +683,7 @@ async function startSession() {
     onEvent: handleEvent,
     onAudio: playTutorAudio,
     onOpen: () => {
-      setStatus(audioError ?? "Занятие идёт", audioError === null ? "ok" : "error");
+      setStatus(audioError ?? t("status.live"), audioError === null ? "ok" : "error");
       // The client is attached: a live session must be closeable even if a
       // previous session's save left the button disabled.
       if (!state.saved && !state.closing) {
@@ -696,7 +704,7 @@ async function startSession() {
   }
 
   try {
-    setStatus("Готовим занятие…");
+    setStatus(t("status.preparing"));
 
     const started = await state.client.start(workspacePath);
     state.sessionId = started.sessionId;
@@ -706,7 +714,7 @@ async function startSession() {
     setCloseEnabled(true);
     state.startedAt = Date.now();
     startClock();
-    setStatus(audioError ?? "Подключаемся…", audioError === null ? "info" : "error");
+    setStatus(audioError ?? t("status.connecting"), audioError === null ? "info" : "error");
   } catch (error) {
     await abandonStart(error);
   }
@@ -733,21 +741,21 @@ async function abandonStart(error) {
 function describeAudioError(error) {
   if (error instanceof Error) {
     if (error.name === "NotAllowedError" || error.name === "SecurityError") {
-      return "Нет доступа к микрофону. Занятие идёт без звука.";
+      return t("audio.denied");
     }
     if (error.name === "NotFoundError") {
-      return "Микрофон не найден. Занятие идёт без звука.";
+      return t("audio.notFound");
     }
-    return `Аудио недоступно: ${error.message}`;
+    return t("audio.unavailable", { message: error.message });
   }
-  return `Аудио недоступно: ${String(error)}`;
+  return t("audio.unavailable", { message: String(error) });
 }
 
 function describeStartError(error) {
   if (error instanceof Error) {
-    return `Ошибка запуска: ${error.message}`;
+    return t("start.failed", { message: error.message });
   }
-  return `Ошибка запуска: ${String(error)}`;
+  return t("start.failed", { message: String(error) });
 }
 
 async function closeSession() {
@@ -758,7 +766,7 @@ async function closeSession() {
   setCloseEnabled(false);
   armCloseGuard();
   stopCapture();
-  setStatus("Завершаем занятие…");
+  setStatus(t("status.ending"));
 
   // The child's close button sends the bare WS message (PROTOCOL §2). If the
   // socket is gone, fall back to the equivalent HTTP route.
@@ -774,7 +782,9 @@ async function closeSession() {
     state.closing = false;
     setCloseEnabled(true);
     setStatus(
-      `Не удалось завершить занятие: ${error instanceof Error ? error.message : String(error)}`,
+      t("status.closeFailed", {
+        message: error instanceof Error ? error.message : String(error),
+      }),
       "error",
     );
   }
@@ -787,7 +797,7 @@ function handleSocketClose() {
   if (state.closing) {
     // The close may already be finalizing server-side; the guard re-enables
     // the button if the confirmation never arrives.
-    setStatus("Соединение закрыто. Проверяем сохранение…");
+    setStatus(t("status.socketChecking"));
     startAfterPolling();
     return;
   }
@@ -795,12 +805,12 @@ function handleSocketClose() {
   // button usable.
   clearCloseGuard();
   setCloseEnabled(true);
-  setStatus("Соединение с прокси закрыто.", "error");
+  setStatus(t("status.socketClosed"), "error");
   stopCapture();
   closeAudio();
 }
 
-function returnToLanding(message = "Готово.", tone = "info") {
+function returnToLanding(message = t("status.done"), tone = "info") {
   state.client?.disconnect();
   state.client = null;
   state.sessionId = null;
@@ -834,10 +844,23 @@ newSessionButton.addEventListener("click", () => {
   if (newSessionButton.disabled) {
     return;
   }
-  returnToLanding("Готово к новому занятию.");
+  returnToLanding(t("status.newReady"));
 });
-exitButton.addEventListener("click", () => returnToLanding("Готово."));
+exitButton.addEventListener("click", () => returnToLanding(t("status.done")));
 
 resetSessionUi();
 showScreen("landing");
-setStatus("Готово.");
+setStatus(t("status.ready"));
+
+// The proxy owns the demo locale; ask it once, then rewrite the page. A fetch
+// failure keeps the Russian default, so unset GROW_LOCALE stays unchanged.
+void loadLocale().then(() => {
+  applyDocument();
+  canvasView.render(state.canvas);
+  renderTranscript();
+  renderBeat();
+  setAfterStatus(t("after.idle"));
+  if (state.sessionId === null) {
+    setStatus(t("status.ready"));
+  }
+});

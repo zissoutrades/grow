@@ -1,5 +1,6 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { currentLocale, type Locale } from "./locale";
 
 export interface PackageFile {
   /** Path relative to the workspace folder, using forward slashes. */
@@ -8,7 +9,7 @@ export interface PackageFile {
 }
 
 export interface SessionPackage {
-  /** One Russian system-instruction text, ready for Gemini's setup message. */
+  /** One system-instruction text in the active locale, ready for Gemini's setup message. */
   readonly systemInstruction: string;
   /** Files that contributed to the instruction, in composition order. */
   readonly files: readonly PackageFile[];
@@ -30,27 +31,62 @@ const REQUIRED_FILES = [
   "memory/child.md",
 ] as const;
 
-const RUNTIME_INSTRUCTIONS = [
-  "Ты — голосовой репетитор по математике для ребёнка шести лет.",
-  "Говори только по-русски, короткими фразами, по одной мысли за раз.",
-  "Отвечай и пиши только по-русски кириллицей.",
-  "Слушай ребёнка и опирайся на учебный план ниже; не пересказывай его вслух.",
-  "Состояние холста — источник истины о клетках и виджетах; формулируй следующий вопрос по состоянию холста, а не по предыдущим догадкам ребёнка.",
-  "На каждом переходе между этапами урока вызывай инструмент advance_beat.",
-  "К концу первого перехода между этапами что-то должно появиться на холсте — не оставляй холст пустым.",
-  "Рисуй на холсте только через инструменты show_ten_frame, fill_frame, show_number_line, show_choice_cards и show_text.",
-  "Когда ребёнок нажимает на холсте, считай это его ответом.",
-  "Если ребёнок ошибся — помоги найти ошибку, не говори «неправильно».",
-  "В конце занятия подведи персональный итог: что у ребёнка получилось легко, что было трудным, и что ждёт его в следующий раз, — вместо шаблонной похвалы.",
-].join("\n");
+const RUNTIME_INSTRUCTIONS: Record<Locale, string> = {
+  ru: [
+    "Ты — голосовой репетитор по математике для ребёнка шести лет.",
+    "Говори только по-русски, короткими фразами, по одной мысли за раз.",
+    "Отвечай и пиши только по-русски кириллицей.",
+    "Слушай ребёнка и опирайся на учебный план ниже; не пересказывай его вслух.",
+    "Состояние холста — источник истины о клетках и виджетах; формулируй следующий вопрос по состоянию холста, а не по предыдущим догадкам ребёнка.",
+    "На каждом переходе между этапами урока вызывай инструмент advance_beat.",
+    "К концу первого перехода между этапами что-то должно появиться на холсте — не оставляй холст пустым.",
+    "Рисуй на холсте только через инструменты show_ten_frame, fill_frame, show_number_line, show_choice_cards и show_text.",
+    "Когда ребёнок нажимает на холсте, считай это его ответом.",
+    "Если ребёнок ошибся — помоги найти ошибку, не говори «неправильно».",
+    "В конце занятия подведи персональный итог: что у ребёнка получилось легко, что было трудным, и что ждёт его в следующий раз, — вместо шаблонной похвалы.",
+  ].join("\n"),
+  en: [
+    "You are a voice math tutor for a six-year-old child.",
+    "Speak only English, in short phrases, one thought at a time.",
+    "Answer and write only in English, using Latin letters.",
+    "Listen to the child and follow the lesson plan below; do not read it aloud.",
+    "The canvas state is the source of truth about cells and widgets; base your next question on the canvas state, not on the child's earlier guesses.",
+    "At every transition between lesson beats, call the advance_beat tool.",
+    "By the end of the first beat transition something must appear on the canvas — never leave it empty.",
+    "Draw on the canvas only through the show_ten_frame, fill_frame, show_number_line, show_choice_cards and show_text tools.",
+    "When the child taps the canvas, treat that as their answer.",
+    "If the child makes a mistake, help them find it — never say a flat “wrong”.",
+    "At the end of the session, give a personal summary: what came easily, what was hard, and what comes next time — not generic praise.",
+  ].join("\n"),
+};
+
+interface PackageCopy {
+  readonly noLesson: string;
+  readonly canvasEmpty: string;
+}
+
+const PACKAGE_COPY: Record<Locale, PackageCopy> = {
+  ru: {
+    noLesson: "=== план урока ===\nПлан урока пока не составлен.",
+    canvasEmpty: "Состояние холста: холст пуст.",
+  },
+  en: {
+    noLesson: "=== lesson plan ===\nNo lesson plan has been made yet.",
+    canvasEmpty: "Canvas state: the canvas is empty.",
+  },
+};
 
 /**
  * Build the deterministic session package from a workspace folder.
  *
- * Order is fixed by PROTOCOL §4: tutor config, curriculum, newest lesson plan,
- * child memory, then one line of canvas state. No model calls, no clock.
+ * Order: runtime instructions, tutor config, curriculum, newest lesson plan,
+ * child memory, then one line of canvas state (PROTOCOL §4). No model calls,
+ * no clock.
  */
-export function buildPackage(workspacePath: string): SessionPackage {
+export function buildPackage(
+  workspacePath: string,
+  locale: Locale = currentLocale(),
+): SessionPackage {
   if (!existsSync(workspacePath) || !statSync(workspacePath).isDirectory()) {
     throw new PackageError(`workspace folder not found: ${workspacePath}`);
   }
@@ -65,7 +101,8 @@ export function buildPackage(workspacePath: string): SessionPackage {
     );
   }
 
-  const sections: string[] = [RUNTIME_INSTRUCTIONS];
+  const copy = PACKAGE_COPY[locale];
+  const sections: string[] = [RUNTIME_INSTRUCTIONS[locale]];
   const files: PackageFile[] = [];
 
   const appendFile = (relativePath: string): void => {
@@ -82,11 +119,11 @@ export function buildPackage(workspacePath: string): SessionPackage {
   if (newestLesson !== null) {
     appendFile(newestLesson);
   } else {
-    sections.push("=== план урока ===\nПлан урока пока не составлен.");
+    sections.push(copy.noLesson);
   }
 
   appendFile("memory/child.md");
-  sections.push("Состояние холста: холст пуст.");
+  sections.push(copy.canvasEmpty);
 
   return {
     systemInstruction: sections.join("\n\n"),

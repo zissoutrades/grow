@@ -1,4 +1,5 @@
-import { TOOL_DECLARATIONS } from "./tools";
+import { sttLanguageCode, type Locale } from "./locale";
+import { toolDeclarations } from "./tools";
 
 export interface GeminiFunctionCall {
   readonly id?: string;
@@ -39,6 +40,8 @@ export interface GeminiConfig {
   readonly model: string;
   readonly voiceName: string;
   readonly systemInstruction: string;
+  /** Demo locale; controls the STT language pin and tool descriptions. */
+  readonly locale?: Locale;
   readonly handle?: string;
   readonly callbacks: GeminiCallbacks;
 }
@@ -58,6 +61,41 @@ export class GeminiError extends Error {
 interface SetupWaiter {
   readonly resolve: () => void;
   readonly reject: (error: Error) => void;
+}
+
+export interface SetupMessageInput {
+  readonly model: string;
+  readonly voiceName: string;
+  readonly systemInstruction: string;
+  readonly locale: Locale;
+  readonly handle?: string;
+}
+
+/**
+ * The Live setup envelope (pure, so tests can assert the STT pin and the
+ * locale-dependent tool descriptions without opening a socket).
+ */
+export function createSetupMessage(input: SetupMessageInput): Record<string, unknown> {
+  const setup: Record<string, unknown> = {
+    model: input.model,
+    generationConfig: {
+      responseModalities: ["AUDIO"],
+      speechConfig: {
+        voiceConfig: {
+          prebuiltVoiceConfig: { voiceName: input.voiceName || DEFAULT_VOICE },
+        },
+      },
+    },
+    systemInstruction: {
+      parts: [{ text: input.systemInstruction }],
+    },
+    tools: [{ functionDeclarations: toolDeclarations(input.locale) }],
+    sessionResumption: input.handle === undefined ? {} : { handle: input.handle },
+    contextWindowCompression: { slidingWindow: {} },
+    inputAudioTranscription: { languageCodes: [sttLanguageCode(input.locale)] },
+    outputAudioTranscription: {},
+  };
+  return { setup };
 }
 
 /**
@@ -290,27 +328,13 @@ export class GeminiLive {
   }
 
   private buildSetupMessage(): Record<string, unknown> {
-    const setup: Record<string, unknown> = {
+    return createSetupMessage({
       model: this.config.model,
-      generationConfig: {
-        responseModalities: ["AUDIO"],
-        speechConfig: {
-          voiceConfig: {
-            prebuiltVoiceConfig: { voiceName: this.config.voiceName || DEFAULT_VOICE },
-          },
-        },
-      },
-      systemInstruction: {
-        parts: [{ text: this.config.systemInstruction }],
-      },
-      tools: [{ functionDeclarations: TOOL_DECLARATIONS }],
-      sessionResumption:
-        this.resumptionHandle === undefined ? {} : { handle: this.resumptionHandle },
-      contextWindowCompression: { slidingWindow: {} },
-      inputAudioTranscription: { languageCodes: ["ru-RU"] },
-      outputAudioTranscription: {},
-    };
-    return { setup };
+      voiceName: this.config.voiceName,
+      systemInstruction: this.config.systemInstruction,
+      locale: this.config.locale ?? "ru",
+      handle: this.resumptionHandle,
+    });
   }
 
   private async handleMessage(data: unknown): Promise<void> {

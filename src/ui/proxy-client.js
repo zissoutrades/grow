@@ -6,6 +6,8 @@
 //        GET  /api/session/:id -> {afterStatus, written}
 // WS:    /live?sessionId=<id> — JSON events up, bare binary PCM both ways.
 
+import { t } from "./locale.js";
+
 export class ProxyClientError extends Error {
   constructor(message, status = 0) {
     super(message);
@@ -54,12 +56,12 @@ export function createProxyClient(handlers = {}, options = {}) {
     const payload = await readJson(response);
     if (!response.ok) {
       throw new ProxyClientError(
-        typeof payload.error === "string" ? payload.error : `запуск не удался (${response.status})`,
+        typeof payload.error === "string" ? payload.error : t("proxy.startFailed", { status: response.status }),
         response.status,
       );
     }
     if (typeof payload.sessionId !== "string" || payload.sessionId.length === 0) {
-      throw new ProxyClientError("прокси не вернул sessionId");
+      throw new ProxyClientError(t("proxy.noSessionId"));
     }
     sessionId = payload.sessionId;
     return {
@@ -70,7 +72,7 @@ export function createProxyClient(handlers = {}, options = {}) {
 
   function connect(id = sessionId) {
     if (id === null) {
-      throw new ProxyClientError("нет сессии для подключения");
+      throw new ProxyClientError(t("proxy.noSessionConnect"));
     }
     disconnect();
     sessionId = id;
@@ -92,7 +94,7 @@ export function createProxyClient(handlers = {}, options = {}) {
         try {
           message = JSON.parse(event.data);
         } catch {
-          handlers.onError?.("прокси прислал некорректный JSON");
+          handlers.onError?.(t("proxy.badJson"));
           return;
         }
         handlers.onEvent?.(message);
@@ -106,7 +108,7 @@ export function createProxyClient(handlers = {}, options = {}) {
         void event.data.arrayBuffer().then((buffer) => handlers.onAudio?.(new Uint8Array(buffer)));
         return;
       }
-      handlers.onError?.("прокси прислал неизвестный тип сообщения");
+      handlers.onError?.(t("proxy.unknownMessage"));
     });
     current.addEventListener("close", (event) => {
       if (socket !== current) {
@@ -117,7 +119,7 @@ export function createProxyClient(handlers = {}, options = {}) {
     });
     current.addEventListener("error", () => {
       if (socket === current) {
-        handlers.onError?.("соединение с прокси недоступно");
+        handlers.onError?.(t("proxy.unreachable"));
       }
     });
   }
@@ -171,7 +173,7 @@ export function createProxyClient(handlers = {}, options = {}) {
 
   async function closeHttp(reason = "child_tap") {
     if (sessionId === null) {
-      throw new ProxyClientError("нет сессии для завершения");
+      throw new ProxyClientError(t("proxy.noSessionClose"));
     }
     const response = await fetch(`${httpBase}/api/close`, {
       method: "POST",
@@ -181,7 +183,7 @@ export function createProxyClient(handlers = {}, options = {}) {
     const payload = await readJson(response);
     if (!response.ok) {
       throw new ProxyClientError(
-        typeof payload.error === "string" ? payload.error : `завершение не удалось (${response.status})`,
+        typeof payload.error === "string" ? payload.error : t("proxy.closeFailed", { status: response.status }),
         response.status,
       );
     }
@@ -190,13 +192,13 @@ export function createProxyClient(handlers = {}, options = {}) {
 
   async function getSessionStatus(id = sessionId) {
     if (id === null) {
-      throw new ProxyClientError("нет сессии");
+      throw new ProxyClientError(t("proxy.noSession"));
     }
     const response = await fetch(`${httpBase}/api/session/${encodeURIComponent(id)}`);
     const payload = await readJson(response);
     if (!response.ok) {
       throw new ProxyClientError(
-        typeof payload.error === "string" ? payload.error : `статус не получен (${response.status})`,
+        typeof payload.error === "string" ? payload.error : t("proxy.statusFailed", { status: response.status }),
         response.status,
       );
     }

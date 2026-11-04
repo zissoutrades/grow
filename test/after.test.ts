@@ -358,3 +358,38 @@ function lastRecord(sessionFolder: string): Record<string, unknown> {
     .split("\n");
   return JSON.parse(lines[lines.length - 1]) as Record<string, unknown>;
 }
+
+describe("after-loop demo locale", () => {
+  test("asks for English artefacts and labels when the locale is en", async () => {
+    const fixturePaths = fixture();
+    const calls: ModelCall[] = [];
+
+    const result = await runAfterLoop({
+      ...context(fixturePaths, fakeModel(PAYLOAD, calls)),
+      locale: "en",
+    });
+
+    expect(result).toEqual({ status: "done", written: ["diary", "report", "plan"] });
+    const system = calls[0].system ?? "";
+    const prompt = calls[0].prompt;
+    expect(system).toContain("you write three texts in English");
+    expect(system).not.toMatch(/[А-Яа-яЁё]/);
+    expect(prompt).toContain("Session date: 2026-10-30");
+    expect(prompt).toContain("Next session date: 2026-10-31");
+    expect(prompt).toContain("Child: Десять");
+    expect(prompt).toContain("Tutor: Сколько будет 7 + 3?");
+    expect(prompt).toContain("Child action (choice):");
+    expect(prompt).toContain("Everything in English.");
+    expect(prompt).not.toContain("Дата занятия");
+  });
+
+  test("keeps the Russian prompt labels when the locale is unset", async () => {
+    const fixturePaths = fixture();
+    const calls: ModelCall[] = [];
+
+    await runAfterLoop(context(fixturePaths, fakeModel(PAYLOAD, calls)));
+
+    expect(calls[0].system ?? "").toContain("ты пишешь три текста по-русски");
+    expect(calls[0].prompt).toContain("Дата занятия: 2026-10-30");
+  });
+});

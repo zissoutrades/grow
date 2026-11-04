@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Grow — консоль родителя</title>
+    <title data-i18n="title.console">Grow — консоль родителя</title>
     <link rel="stylesheet" href="/console/style.css" />
     <style>
       .topbar {
@@ -430,21 +430,21 @@
   </head>
   <body>
     <header class="topbar">
-      <div class="brand">Grow · консоль родителя</div>
+      <div class="brand" data-i18n="console.brand">Grow · консоль родителя</div>
       <div class="console-head-actions">
-        <a class="small-button" href="/" style="text-decoration: none;">Занятие</a>
-        <button id="close-session-button" class="close-button console-close" type="button" hidden>
+        <a class="small-button" href="/" style="text-decoration: none;" data-i18n="console.sessionLink">Занятие</a>
+        <button id="close-session-button" class="close-button console-close" type="button" hidden data-i18n="console.close">
           Завершить занятие
         </button>
       </div>
     </header>
 
-    <div id="status" class="status" role="status" aria-live="polite">Загрузка…</div>
+    <div id="status" class="status" role="status" aria-live="polite" data-i18n="status.loading">Загрузка…</div>
 
     <main class="main">
-      <section class="console-toolbar" aria-label="Папка занятия">
+      <section class="console-toolbar" aria-label="Папка занятия" data-i18n-aria-label="console.workspaceSection">
         <div style="flex: 1 1 360px">
-          <label class="field-label" for="workspace-input">Папка занятия</label>
+          <label class="field-label" for="workspace-input" data-i18n="console.workspaceLabel">Папка занятия</label>
           <div class="console-workspace-row">
             <input
               id="workspace-input"
@@ -455,23 +455,24 @@
               placeholder="/home/…/grow/workspace"
             />
             <div id="recent-row" class="console-recents" hidden>
-              <span class="console-recent-label">Недавние:</span>
+              <span class="console-recent-label" data-i18n="console.recent">Недавние:</span>
               <select
                 id="recent-select"
                 class="console-recent-select"
                 aria-label="Недавние папки"
+                data-i18n-aria-label="console.recentAria"
               ></select>
             </div>
           </div>
         </div>
-        <button id="workspace-open" class="small-button primary" type="button">Открыть</button>
+        <button id="workspace-open" class="small-button primary" type="button" data-i18n="console.open">Открыть</button>
       </section>
 
       <div class="console-grid">
-        <section class="console-panel console-chat" aria-label="Чат с менеджером">
-          <h2>Чат с менеджером</h2>
+        <section class="console-panel console-chat" aria-label="Чат с менеджером" data-i18n-aria-label="console.chatSection">
+          <h2 data-i18n="console.chatTitle">Чат с менеджером</h2>
           <div id="chat-log" class="chat-log" aria-live="polite">
-            <p class="chat-empty">Спросите, что изменить в занятии…</p>
+            <p class="chat-empty" data-i18n="console.chatEmpty">Спросите, что изменить в занятии…</p>
           </div>
           <form id="chat-form" class="chat-form">
             <textarea
@@ -479,37 +480,38 @@
               class="chat-input"
               rows="2"
               placeholder="Например: сделай тьютора мягче и короче"
+              data-i18n-placeholder="console.chatPlaceholder"
             ></textarea>
-            <button id="chat-send" class="start-button chat-send" type="submit">Отправить</button>
+            <button id="chat-send" class="start-button chat-send" type="submit" data-i18n="console.send">Отправить</button>
           </form>
         </section>
 
-        <section class="console-panel console-config" aria-label="Конфигурация">
-          <h2>Конфигурация</h2>
+        <section class="console-panel console-config" aria-label="Конфигурация" data-i18n-aria-label="console.configSection">
+          <h2 data-i18n="console.configTitle">Конфигурация</h2>
           <div id="config-tabs" class="tab-row" role="tablist">
-            <button class="tab active" type="button" data-file="tutor">тьютор</button>
-            <button class="tab" type="button" data-file="curriculum">программа</button>
-            <button class="tab" type="button" data-file="permissions">права</button>
+            <button class="tab active" type="button" data-file="tutor" data-i18n="console.tab.tutor">тьютор</button>
+            <button class="tab" type="button" data-file="curriculum" data-i18n="console.tab.curriculum">программа</button>
+            <button class="tab" type="button" data-file="permissions" data-i18n="console.tab.permissions">права</button>
           </div>
           <textarea id="config-editor" class="config-editor" spellcheck="false"></textarea>
           <div class="config-actions">
-            <button id="config-save" class="small-button primary" type="button">Сохранить</button>
+            <button id="config-save" class="small-button primary" type="button" data-i18n="console.save">Сохранить</button>
             <span id="config-hint" class="hint-inline"></span>
           </div>
-          <h3 class="subhead">Пресеты</h3>
+          <h3 class="subhead" data-i18n="console.presets">Пресеты</h3>
           <div id="preset-list" class="preset-list"></div>
         </section>
 
-        <aside class="console-panel console-side" aria-label="Панель">
-          <h2>Панель</h2>
+        <aside class="console-panel console-side" aria-label="Панель" data-i18n-aria-label="console.sideSection">
+          <h2 data-i18n="console.sideTitle">Панель</h2>
           <div id="side-tabs" class="tab-row" role="tablist">
-            <button class="tab active" type="button" data-view="diff">разница</button>
-            <button class="tab" type="button" data-view="diary">дневник</button>
-            <button class="tab" type="button" data-view="report">отчёт</button>
-            <button class="tab" type="button" data-view="lesson">план</button>
+            <button class="tab active" type="button" data-view="diff" data-i18n="console.tab.diff">разница</button>
+            <button class="tab" type="button" data-view="diary" data-i18n="console.tab.diary">дневник</button>
+            <button class="tab" type="button" data-view="report" data-i18n="console.tab.report">отчёт</button>
+            <button class="tab" type="button" data-view="lesson" data-i18n="console.tab.lesson">план</button>
           </div>
           <div id="side-diff" class="diff-view">
-            <p class="side-empty">Изменений пока нет.</p>
+            <p class="side-empty" data-i18n="console.noChanges">Изменений пока нет.</p>
           </div>
           <div id="side-md" class="md-view" hidden></div>
         </aside>

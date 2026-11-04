@@ -3,6 +3,7 @@ import {
   executeToolCall,
   formatChildAction,
   TOOL_DECLARATIONS,
+  toolDeclarations,
   ToolValidationError,
 } from "../src/proxy/tools";
 
@@ -165,6 +166,44 @@ describe("formatChildAction", () => {
   test("rejects a malformed action", () => {
     expect(() => formatChildAction({ kind: "choice", value: 42 })).toThrow(
       ToolValidationError,
+    );
+  });
+});
+
+describe("tool locale", () => {
+  test("tool descriptions and canvas labels follow the demo locale", () => {
+    const declarations = toolDeclarations("en");
+    const advance = declarations.find((declaration) => declaration.name === "advance_beat");
+    const tenFrame = declarations.find((declaration) => declaration.name === "show_ten_frame");
+    const fill = declarations.find((declaration) => declaration.name === "fill_frame");
+
+    expect(advance?.description).toBe(
+      "Mark a transition to the next lesson beat. Call it at every transition.",
+    );
+    expect(tenFrame?.description).toBe(
+      "Show a ten-frame on the canvas with cells filled left to right.",
+    );
+    expect(fill?.description).toBe(
+      "Fill one cell of the ten-frame on the canvas.",
+    );
+    expect(declarations.map((declaration) => declaration.name)).toEqual(
+      TOOL_DECLARATIONS.map((declaration) => declaration.name),
+    );
+
+    expect(formatChildAction({ kind: "choice", value: { label: "seven" } }, "en")).toBe(
+      "[canvas] child tapped: card seven",
+    );
+    expect(formatChildAction({ kind: "tenframe", value: 4 }, "en")).toBe(
+      "[canvas] child tapped: cell 5",
+    );
+    expect(formatChildAction({ kind: "numberline", value: { value: 8 } }, "en")).toBe(
+      "[canvas] child tapped: number 8",
+    );
+  });
+
+  test("the Russian defaults are unchanged", () => {
+    expect(formatChildAction({ kind: "choice", value: { label: "семь" } })).toBe(
+      "[canvas] ребёнок нажал: карточка семь",
     );
   });
 });

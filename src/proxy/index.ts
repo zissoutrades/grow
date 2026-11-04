@@ -11,6 +11,7 @@ import {
   readConsoleFiles,
   writeConsoleConfig,
 } from "./console";
+import { currentLocale } from "./locale";
 import { readRecents, recordRecent, recentsFilePath } from "./recents";
 import { Session, type ClientSink, type FinalizeReason } from "./session";
 import { uiAsset } from "./static";
@@ -71,6 +72,11 @@ export function createServer(port: number = PORT): Server {
       }
       if (url.pathname === "/api/workspaces/recent" && request.method === "GET") {
         return json({ recents: readRecents(recentsFilePath()) });
+      }
+      // The UI is static and cannot read the proxy's environment, so it asks
+      // which demo locale this process runs with (handoff 2026-11-01).
+      if (url.pathname === "/api/locale" && request.method === "GET") {
+        return json({ locale: currentLocale() });
       }
       if (url.pathname === "/api/close" && request.method === "POST") {
         return handleClose(request);

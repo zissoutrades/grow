@@ -1,5 +1,6 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
+import { currentLocale, type Locale } from "./locale";
 import { findNewestLesson } from "./package";
 import { generateText, type TextModelFn } from "./text-model";
 
@@ -7,7 +8,7 @@ import { generateText, type TextModelFn } from "./text-model";
  * Post-session after-loop (PROTOCOL §7/§9).
  *
  * One text-model call reads the closed session log plus the workspace files and
- * returns `{diary, report, planRevision}` in Russian. The loop writes exactly
+ * returns `{diary, report, planRevision}` in the active locale. The loop writes exactly
  * three files — `memory/diary/<date>.md`, `reports/<date>-report.md` and a new
  * `plans/lesson-<next-date>.md` — and appends the `after` record to the closed
  * `session.jsonl`.
@@ -30,6 +31,8 @@ export interface AfterContext {
   readonly sessionFolder: string;
   readonly workspacePath: string;
   readonly reason: "child_tap" | "parent_console" | "timeout" | "silence" | "child_unresponsive";
+  /** Demo locale; defaults to the proxy's `GROW_LOCALE` (Russian when unset). */
+  readonly locale?: Locale;
   /** Injectable text model for tests; defaults to the shared §9 route. */
   readonly generateText?: TextModelFn;
   /** Injectable clock, used when the session stamp lacks a date/time and for the no-plan rule. */
@@ -65,16 +68,91 @@ export class AfterError extends Error {
 
 const WRITTEN_KINDS = ["diary", "report", "plan"] as const;
 
-const SYSTEM_PROMPT = [
-  "Ты — методист и аналитик учебных занятий для ребёнка шести лет.",
-  "По стенограмме занятия и файлам рабочей папки ты пишешь три текста по-русски.",
-  "Ответ — строго один JSON-объект без пояснений и без markdown-ограждений.",
-  'Схема: {"diary": "…", "report": "…", "planRevision": "…"}',
-  "diary — короткая тёплая запись для родителя, 3–5 предложений: как прошло занятие, что получилось.",
-  "report — разбор для родителя: что происходило, какие были сигналы (успехи, трудности, ошибки), что это значит для следующих занятий.",
-  "planRevision — полный план следующего занятия в том же формате, что файл plans/lesson-*.md: заголовок с датой, нумерованные шаги по битам (recall, present, attempt, diagnose, repair, extend, consolidate, reflect, close).",
-  "Опирайся только на стенограмму и файлы; не выдумывай фактов. Никаких пояснений вокруг JSON.",
-].join("\n");
+interface AfterCopy {
+  readonly sessionDate: string;
+  readonly nextLessonDate: string;
+  readonly reason: string;
+  readonly lessonHeading: string;
+  readonly noLesson: string;
+  readonly transcriptHeading: string;
+  readonly outcomeHeading: string;
+  readonly childRole: string;
+  readonly tutorRole: string;
+  readonly beat: (beatId: string, outcome: string) => string;
+  readonly childAction: (kind: string, text: string) => string;
+  readonly tool: (name: string, args: string) => string;
+  readonly emptyTranscript: string;
+  readonly jsonInstruction: string;
+  readonly cost: (usd: string) => string;
+  readonly duration: (minutes: string) => string;
+  readonly droppedFrames: (frames: string) => string;
+}
+
+const SYSTEM_PROMPTS: Record<Locale, string> = {
+  ru: [
+    "Ты — методист и аналитик учебных занятий для ребёнка шести лет.",
+    "По стенограмме занятия и файлам рабочей папки ты пишешь три текста по-русски.",
+    "Ответ — строго один JSON-объект без пояснений и без markdown-ограждений.",
+    'Схема: {"diary": "…", "report": "…", "planRevision": "…"}',
+    "diary — короткая тёплая запись для родителя, 3–5 предложений: как прошло занятие, что получилось.",
+    "report — разбор для родителя: что происходило, какие были сигналы (успехи, трудности, ошибки), что это значит для следующих занятий.",
+    "planRevision — полный план следующего занятия в том же формате, что файл plans/lesson-*.md: заголовок с датой, нумерованные шаги по битам (recall, present, attempt, diagnose, repair, extend, consolidate, reflect, close).",
+    "Опирайся только на стенограмму и файлы; не выдумывай фактов. Никаких пояснений вокруг JSON.",
+  ].join("\n"),
+  en: [
+    "You are a teaching methodologist and session analyst for a six-year-old child.",
+    "From the session transcript and the workspace files you write three texts in English.",
+    "Reply with exactly one JSON object, no commentary and no markdown fences.",
+    'Schema: {"diary": "…", "report": "…", "planRevision": "…"}',
+    "diary — a short, warm note for the parent, 3–5 sentences: how the session went and what went well.",
+    "report — an analysis for the parent: what happened, which signals appeared (successes, struggles, mistakes), and what they mean for the next sessions.",
+    "planRevision — the full plan for the next session in the same format as plans/lesson-*.md: a dated header and numbered steps for the beats (recall, present, attempt, diagnose, repair, extend, consolidate, reflect, close).",
+    "Use only the transcript and the files; do not invent facts. No text around the JSON.",
+  ].join("\n"),
+};
+
+const AFTER_COPY: Record<Locale, AfterCopy> = {
+  ru: {
+    sessionDate: "Дата занятия",
+    nextLessonDate: "Дата следующего занятия",
+    reason: "Причина завершения",
+    lessonHeading: "=== план урока ===",
+    noLesson: "План урока не найден.",
+    transcriptHeading: "=== стенограмма занятия ===",
+    outcomeHeading: "=== итог занятия ===",
+    childRole: "Ребёнок",
+    tutorRole: "Репетитор",
+    beat: (beatId, outcome) => `Бит: ${beatId} — ${outcome}`,
+    childAction: (kind, text) => `Действие ребёнка (${kind}): ${text}`,
+    tool: (name, args) => `Инструмент: ${name} ${args}`,
+    emptyTranscript: "(стенограмма пуста)",
+    jsonInstruction:
+      "Верни JSON-объект с ключами diary, report и planRevision. Всё по-русски.",
+    cost: (usd) => `стоимость: $${usd}`,
+    duration: (minutes) => `длительность: ${minutes} мин`,
+    droppedFrames: (frames) => `потеряно аудиокадров: ${frames}`,
+  },
+  en: {
+    sessionDate: "Session date",
+    nextLessonDate: "Next session date",
+    reason: "End reason",
+    lessonHeading: "=== lesson plan ===",
+    noLesson: "No lesson plan found.",
+    transcriptHeading: "=== session transcript ===",
+    outcomeHeading: "=== session outcome ===",
+    childRole: "Child",
+    tutorRole: "Tutor",
+    beat: (beatId, outcome) => `Beat: ${beatId} — ${outcome}`,
+    childAction: (kind, text) => `Child action (${kind}): ${text}`,
+    tool: (name, args) => `Tool: ${name} ${args}`,
+    emptyTranscript: "(transcript is empty)",
+    jsonInstruction:
+      "Return a JSON object with the keys diary, report and planRevision. Everything in English.",
+    cost: (usd) => `cost: $${usd}`,
+    duration: (minutes) => `duration: ${minutes} min`,
+    droppedFrames: (frames) => `dropped audio frames: ${frames}`,
+  },
+};
 
 interface WorkspaceTexts {
   readonly tutor: string;
@@ -93,6 +171,7 @@ export async function runAfterLoop(context: AfterContext): Promise<AfterResult> 
   let skippedLines = 0;
 
   try {
+    const locale = context.locale ?? currentLocale();
     const journal = readJournal(context.sessionFolder);
     skippedLines = journal.skipped;
     const now = context.now ?? (() => new Date());
@@ -101,14 +180,14 @@ export async function runAfterLoop(context: AfterContext): Promise<AfterResult> 
     const nextLessonDate = nextLessonDateFor(context.workspacePath, sessionDate, now);
     const workspace = readWorkspace(context.workspacePath);
 
-    const prompt = buildPrompt(context, {
+    const prompt = buildPrompt(context, locale, {
       sessionDate,
       nextLessonDate,
       workspace,
       records: journal.records,
     });
 
-    const raw = await model(prompt, SYSTEM_PROMPT);
+    const raw = await model(prompt, SYSTEM_PROMPTS[locale]);
     const payload = parseAfterResponse(raw);
     const files = afterFiles(sessionDate, sessionTime, nextLessonDate, (relativePath) =>
       existsSync(join(context.workspacePath, relativePath)),
@@ -274,6 +353,7 @@ export function nextLessonDateFor(
 
 function buildPrompt(
   context: AfterContext,
+  locale: Locale,
   input: {
     readonly sessionDate: string;
     readonly nextLessonDate: string;
@@ -282,38 +362,39 @@ function buildPrompt(
   },
 ): string {
   const { sessionDate, nextLessonDate, workspace, records } = input;
+  const copy = AFTER_COPY[locale];
   const sections: string[] = [
-    `Дата занятия: ${sessionDate}`,
-    `Дата следующего занятия: ${nextLessonDate}`,
-    `Причина завершения: ${context.reason}`,
+    `${copy.sessionDate}: ${sessionDate}`,
+    `${copy.nextLessonDate}: ${nextLessonDate}`,
+    `${copy.reason}: ${context.reason}`,
     "",
     `=== config/tutor.md ===\n${workspace.tutor.trimEnd()}`,
     `=== config/curriculum.md ===\n${workspace.curriculum.trimEnd()}`,
     workspace.lessonPath === null
-      ? "=== план урока ===\nПлан урока не найден."
+      ? `${copy.lessonHeading}\n${copy.noLesson}`
       : `=== ${workspace.lessonPath} ===\n${workspace.lesson.trimEnd()}`,
     `=== memory/child.md ===\n${workspace.child.trimEnd()}`,
-    "=== стенограмма занятия ===",
-    buildTranscript(records),
-    "=== итог занятия ===",
-    buildOutcome(context, records),
+    copy.transcriptHeading,
+    buildTranscript(records, copy),
+    copy.outcomeHeading,
+    buildOutcome(context, records, copy),
     "",
-    "Верни JSON-объект с ключами diary, report и planRevision. Всё по-русски.",
+    copy.jsonInstruction,
   ];
   return sections.join("\n");
 }
 
-function buildTranscript(records: readonly JournalRecord[]): string {
+function buildTranscript(records: readonly JournalRecord[], copy: AfterCopy): string {
   const lines: string[] = [];
   for (const record of records) {
     const kind = typeof record.kind === "string" ? record.kind : "";
     if (kind === "transcript" && record.partial === false && typeof record.text === "string") {
-      const role = record.role === "child" ? "Ребёнок" : "Репетитор";
+      const role = record.role === "child" ? copy.childRole : copy.tutorRole;
       lines.push(`${role}: ${record.text}`);
       continue;
     }
     if (kind === "beat") {
-      lines.push(`Бит: ${String(record.beatId ?? "?")} — ${String(record.outcome ?? "?")}`);
+      lines.push(copy.beat(String(record.beatId ?? "?"), String(record.outcome ?? "?")));
       continue;
     }
     // Current records are `kind:"child_action"` with the action kind in
@@ -322,17 +403,21 @@ function buildTranscript(records: readonly JournalRecord[]): string {
     if (kind === "child_action" || isChildActionKind(kind)) {
       const actionKind = typeof record.action === "string" ? record.action : kind;
       const text = typeof record.text === "string" ? record.text : JSON.stringify(record.value ?? null);
-      lines.push(`Действие ребёнка (${actionKind}): ${text}`);
+      lines.push(copy.childAction(actionKind, text));
       continue;
     }
     if (kind === "tool_call") {
-      lines.push(`Инструмент: ${String(record.name ?? "?")} ${JSON.stringify(record.args ?? {})}`);
+      lines.push(copy.tool(String(record.name ?? "?"), JSON.stringify(record.args ?? {})));
     }
   }
-  return lines.length > 0 ? lines.join("\n") : "(стенограмма пуста)";
+  return lines.length > 0 ? lines.join("\n") : copy.emptyTranscript;
 }
 
-function buildOutcome(context: AfterContext, records: readonly JournalRecord[]): string {
+function buildOutcome(
+  context: AfterContext,
+  records: readonly JournalRecord[],
+  copy: AfterCopy,
+): string {
   const end = records.find((record) => record.kind === "session_end");
   if (end === undefined) {
     return `reason: ${context.reason}`;
@@ -340,13 +425,13 @@ function buildOutcome(context: AfterContext, records: readonly JournalRecord[]):
   const estimate = isRecord(end.estimate) ? end.estimate : null;
   const parts = [`reason: ${context.reason}`];
   if (estimate !== null && typeof estimate.usd === "number") {
-    parts.push(`стоимость: $${estimate.usd.toFixed(4)}`);
+    parts.push(copy.cost(estimate.usd.toFixed(4)));
   }
   if (estimate !== null && typeof estimate.minutes === "number") {
-    parts.push(`длительность: ${estimate.minutes.toFixed(1)} мин`);
+    parts.push(copy.duration(estimate.minutes.toFixed(1)));
   }
   if (typeof end.droppedAudioFrames === "number") {
-    parts.push(`потеряно аудиокадров: ${end.droppedAudioFrames}`);
+    parts.push(copy.droppedFrames(String(end.droppedAudioFrames)));
   }
   return parts.join("; ");
 }

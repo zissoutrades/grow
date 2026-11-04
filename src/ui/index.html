@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Grow — занятие</title>
+    <title data-i18n="title.app">Grow — занятие</title>
     <link rel="stylesheet" href="./style.css" />
   </head>
   <body>
@@ -12,25 +12,25 @@
       <div style="display: flex; align-items: center; justify-content: flex-end; gap: 12px">
         <div id="session-meta" class="session-meta" hidden>
           <span id="clock" class="clock">00:00</span>
-          <span id="beat" class="beat">этап: —</span>
+          <span id="beat" class="beat" data-i18n="beat.none">этап: —</span>
         </div>
-        <a class="link-button" href="/console" style="margin-top: 0">Консоль родителя</a>
+        <a class="link-button" href="/console" style="margin-top: 0" data-i18n="topbar.console">Консоль родителя</a>
       </div>
     </header>
 
-    <div id="status" class="status" role="status" aria-live="polite">Готово.</div>
+    <div id="status" class="status" role="status" aria-live="polite" data-i18n="status.ready">Готово.</div>
 
     <main class="main">
       <section id="screen-landing" class="screen landing">
-        <h1>Занятие с тьютором</h1>
-        <p class="lede">
+        <h1 data-i18n="landing.title">Занятие с тьютором</h1>
+        <p class="lede" data-i18n="landing.lede">
           Укажите папку занятия. Тьютор прочитает конфиг, память и план урока из
           этих файлов.
         </p>
-        <label class="field-label" for="workspace-path">Папка занятия</label>
+        <label class="field-label" for="workspace-path" data-i18n="landing.workspace">Папка занятия</label>
         <div id="recent-row" class="recent-row" hidden>
-          <span class="recent-label">Недавние:</span>
-          <select id="recent-select" class="recent-select" aria-label="Недавние папки"></select>
+          <span class="recent-label" data-i18n="landing.recent">Недавние:</span>
+          <select id="recent-select" class="recent-select" aria-label="Недавние папки" data-i18n-aria-label="landing.recentAria"></select>
         </div>
         <input
           id="workspace-path"
@@ -40,34 +40,34 @@
           autocomplete="off"
           placeholder="/home/…/grow/workspace"
         />
-        <button id="start-button" class="start-button" type="button">Начать занятие</button>
-        <p class="hint">
+        <button id="start-button" class="start-button" type="button" data-i18n="landing.start">Начать занятие</button>
+        <p class="hint" data-i18n="landing.hint">
           Микрофон включится сразу. Всё остальное — голосом и нажатиями на холсте.
         </p>
       </section>
 
       <section id="screen-session" class="screen session" hidden>
         <div class="session-head">
-          <button id="close-button" class="close-button" type="button">Завершить занятие</button>
+          <button id="close-button" class="close-button" type="button" data-i18n="session.close">Завершить занятие</button>
         </div>
 
         <div class="session-body">
           <div id="canvas" class="canvas" aria-live="polite">
-            <p id="canvas-empty" class="canvas-empty">холст пуст</p>
+            <p id="canvas-empty" class="canvas-empty" data-i18n="canvas.empty">холст пуст</p>
 
             <section id="widget-tenframe" class="widget tenframe-widget" hidden>
-              <h2>Рамка из десяти</h2>
+              <h2 data-i18n="canvas.tenframe">Рамка из десяти</h2>
               <div id="tenframe-grid" class="tenframe-grid"></div>
               <p id="tenframe-caption" class="widget-caption"></p>
             </section>
 
             <section id="widget-numberline" class="widget numberline-widget" hidden>
-              <h2>Числовая прямая</h2>
+              <h2 data-i18n="canvas.numberline">Числовая прямая</h2>
               <div id="numberline" class="numberline"></div>
             </section>
 
             <section id="widget-choices" class="widget choice-widget" hidden>
-              <h2>Выбери ответ</h2>
+              <h2 data-i18n="canvas.choices">Выбери ответ</h2>
               <div id="choices-grid" class="choices-grid"></div>
             </section>
 
@@ -75,19 +75,19 @@
           </div>
 
           <aside class="transcript-panel">
-            <h2>Разговор</h2>
+            <h2 data-i18n="transcript.title">Разговор</h2>
             <div id="transcript" class="transcript"></div>
           </aside>
         </div>
       </section>
 
       <section id="screen-closed" class="screen closed" hidden>
-        <h1>сессия сохранена</h1>
-        <p id="after-status" class="after-status">после сессии: —</p>
-        <button id="new-session-button" class="start-button" type="button" disabled>
+        <h1 data-i18n="closed.title">сессия сохранена</h1>
+        <p id="after-status" class="after-status" data-i18n="after.idle">после сессии: —</p>
+        <button id="new-session-button" class="start-button" type="button" disabled data-i18n="closed.new">
           Новое занятие
         </button>
-        <button id="exit-button" class="link-button" type="button">выйти</button>
+        <button id="exit-button" class="link-button" type="button" data-i18n="closed.exit">выйти</button>
       </section>
     </main>
 
