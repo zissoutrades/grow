@@ -61,8 +61,8 @@ export const DEFAULT_DURATIONS: SessionDurations = {
   silenceMs: 3 * 60 * 1000,
   midSessionNudgeMs: 3 * 60 * 1000,
   midSessionCloseMs: 2 * 60 * 1000,
-  greetingGraceMs: 8_000,
-  greetingRetryMs: 12_000,
+  greetingGraceMs: 20_000,
+  greetingRetryMs: 25_000,
   farewellGraceMs: 3_000,
 };
 
@@ -424,6 +424,21 @@ export class SessionTimers {
   }
 
   private handleGreetingTurnComplete(): void {
+    // A later tutor turn can carry the first question: the greeting turn's
+    // advance_beat tool response starts a new turn, and a stray markup turn
+    // adds another. While the initial grace is pending and no retry has been
+    // injected, restart the settle from this turn so the grace counts from the
+    // end of the tutor's LAST audio before any retry, not from the greeting.
+    // Once a retry is injected (greetingAttempt > 0) its own turn keeps the
+    // existing retry-gap behavior.
+    if (
+      this.greetingArmed &&
+      this.greetingAttempt === 0 &&
+      this.phase === "grace" &&
+      this.settleStage === null
+    ) {
+      this.awaitTutorSettle("greeting");
+    }
     if (this.settleStage === null || this.settleTurnComplete) {
       return;
     }
@@ -1480,13 +1495,18 @@ const LEAKED_TAG = /<\/?[a-z][a-z0-9_-]*\b[^>]*?\/?>/gi;
 
 /**
  * Strip model-internal markup from a transcript chunk before it reaches the
- * log or the child's screen: `<metadata>`/`<signature>` blocks, any other
- * angle-bracket tag, and raw `call:name{...}` / `function_call{...}` syntax
- * (with a balanced or truncated argument block). Pure and idempotent;
- * ordinary speech is preserved.
+ * log or the child's screen: `<!-- ... -->` comments, `<metadata>`/`<signature>`
+ * blocks, any other angle-bracket tag, and raw `call:name{...}` /
+ * `function_call{...}` syntax (with a balanced or truncated argument block).
+ * Pure and idempotent; ordinary speech is preserved.
  */
 export function sanitizeTranscript(text: string): string {
   let clean = text;
+  // HTML comments are never speech (the model once emitted
+  // `<!-- Waiting for child's response -->`). A chunk is stream-safe only for
+  // complete pairs: an unclosed opener is dropped to the end of this chunk.
+  clean = clean.replace(/<!--[\s\S]*?-->/g, " ");
+  clean = clean.replace(/<!--[\s\S]*$/g, " ");
   for (const tag of LEAKED_CONTAINER_TAGS) {
     const paired = new RegExp(`<${tag}\\b[^>]*>[\\s\\S]*?<\\/${tag}\\s*>`, "gi");
     clean = clean.replace(paired, " ");

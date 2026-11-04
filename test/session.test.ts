@@ -325,6 +325,34 @@ describe("Session", () => {
     expect(typeof idle?.ts).toBe("string");
   });
 
+  test("a later tutor turn restarts the initial grace before it expires", async () => {
+    const harness = await startSession({
+      closeInstructionMs: 100_000,
+      hardCapMs: 100_000,
+      silenceMs: 100_000,
+      greetingGraceMs: 1_000,
+      greetingRetryMs: 1_000,
+      farewellGraceMs: 500,
+    });
+    const { session, gemini, clock } = harness;
+
+    // The greeting turn settles: the grace is armed for 1 s from its end.
+    settleTutor(harness);
+    clock.advance(500);
+    // The first question is spoken in a later tutor turn, before that grace
+    // expires. The grace must restart from THIS turn's end instead.
+    settleTutor(harness);
+    clock.advance(500);
+    expect(gemini.sentTexts).toEqual([GREETING_INSTRUCTION]);
+
+    clock.advance(499);
+    expect(gemini.sentTexts).toEqual([GREETING_INSTRUCTION]);
+    clock.advance(1);
+    expect(gemini.sentTexts).toContain(GREETING_RETRY_INSTRUCTIONS[0]);
+
+    await session.finalize("child_tap");
+  });
+
   test("nudges a silent child mid-session, then closes with child_unresponsive", async () => {
     const harness = await startSession({
       closeInstructionMs: 1_000_000,
@@ -617,6 +645,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+
 describe("sanitizeTranscript", () => {
   test("drops a metadata block entirely", () => {
     expect(sanitizeTranscript("\n<metadata>\n</metadata>")).toBe("");
@@ -644,6 +673,24 @@ describe("sanitizeTranscript", () => {
     expect(sanitizeTranscript("Great job! Step 13 is next — how did you know?")).toBe(
       "Great job! Step 13 is next — how did you know?",
     );
+  });
+
+  test("drops a complete HTML comment", () => {
+    expect(
+      sanitizeTranscript("Смотри <!-- Waiting for child's response --> дальше"),
+    ).toBe("Смотри дальше");
+  });
+
+  test("strips an unclosed HTML comment opener at the end of a chunk", () => {
+    expect(sanitizeTranscript("Здорово <!--")).toBe("Здорово");
+  });
+
+  test("strips from an unclosed comment opener mid-chunk to the end of the chunk", () => {
+    expect(sanitizeTranscript("Здорово <!-- Waiting for the child")).toBe("Здорово");
+  });
+
+  test("leaves ordinary math phrasing with separate < ! - - characters untouched", () => {
+    expect(sanitizeTranscript("3 < 4 ! 5 - 2 - 1 = 6")).toBe("3 < 4 ! 5 - 2 - 1 = 6");
   });
 });
 

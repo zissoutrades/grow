@@ -40,6 +40,7 @@ const RUNTIME_INSTRUCTIONS: Record<Locale, string> = {
     "Состояние холста — источник истины о клетках и виджетах; формулируй следующий вопрос по состоянию холста, а не по предыдущим догадкам ребёнка.",
     "На каждом переходе между этапами урока вызывай инструмент advance_beat.",
     "Вызывай advance_beat, когда начинаешь новый этап, перед вопросом этого этапа. Затем задай вопрос и дождись ответа ребёнка, прежде чем вызывать advance_beat для следующего этапа.",
+    "После того как ты задал вопрос, тихо ждать ответа ребёнка — правильно и ожидаемо. Никогда не произноси режиссёрские ремарки, комментарии или разметку вроде <!-- ... --> — это никогда не звучит вслух.",
     "К концу первого перехода между этапами что-то должно появиться на холсте — не оставляй холст пустым.",
     "Рисуй на холсте только через инструменты show_ten_frame, fill_frame, show_number_line, show_choice_cards и show_text.",
     "Когда ребёнок нажимает на холсте, считай это его ответом.",
@@ -59,6 +60,7 @@ const RUNTIME_INSTRUCTIONS: Record<Locale, string> = {
     "When the child taps the canvas, treat that as their answer.",
     "Never count for the child: the child says the numbers. Count only to confirm what the child already counted.",
     "End every turn with a question to the child; never announce a step and then wait silently.",
+    "After asking a question, waiting quietly for the child's answer is correct and expected. Never speak stage directions, comments, or markup such as <!-- ... --> — those are never said aloud.",
     "At the end of the session, give a personal summary: what came easily, what was hard, and what comes next time — not generic praise.",
   ].join("\n"),
 };

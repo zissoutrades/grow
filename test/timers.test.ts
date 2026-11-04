@@ -167,9 +167,9 @@ describe("SessionTimers", () => {
     expect(counters.instruction).toBe(0);
   });
 
-  test("greeting failsafe uses 8 s grace, 12 s retry gaps, 3 s farewell grace", () => {
-    expect(DEFAULT_DURATIONS.greetingGraceMs).toBe(8_000);
-    expect(DEFAULT_DURATIONS.greetingRetryMs).toBe(12_000);
+  test("greeting failsafe uses 20 s grace, 25 s retry gaps, 3 s farewell grace", () => {
+    expect(DEFAULT_DURATIONS.greetingGraceMs).toBe(20_000);
+    expect(DEFAULT_DURATIONS.greetingRetryMs).toBe(25_000);
     expect(DEFAULT_DURATIONS.farewellGraceMs).toBe(3_000);
     expect(PLAYBACK_IDLE_FALLBACK_MS).toBe(2_000);
     expect(FAREWELL_IDLE_FALLBACK_MS).toBe(3_000);
@@ -194,8 +194,24 @@ describe("SessionTimers", () => {
     expect(counters.retries).toEqual([]);
 
     timers.noteTutorTurnComplete();
-    clock.advance(7_999);
+    clock.advance(19_999);
     expect(counters.retries).toEqual([]);
+    clock.advance(1);
+    expect(counters.retries).toEqual([1]);
+  });
+
+  test("a later tutor turn restarts the initial grace before any retry", () => {
+    const { clock, counters, timers } = setup(LADDER_DURATIONS);
+    timers.armGreetingWatchdog();
+
+    settle(timers);
+    clock.advance(10_000);
+    // A second tutor turn (the first question) completes and its audio drains
+    // before the original 20 s grace expires.
+    settle(timers);
+    clock.advance(19_999);
+    expect(counters.retries).toEqual([]);
+
     clock.advance(1);
     expect(counters.retries).toEqual([1]);
   });
@@ -208,10 +224,10 @@ describe("SessionTimers", () => {
     clock.advance(PLAYBACK_IDLE_FALLBACK_MS - 1);
     expect(counters.retries).toEqual([]);
 
-    // The fallback only arms the phase; the 8 s grace still runs.
+    // The fallback only arms the phase; the 20 s grace still runs.
     clock.advance(1);
     expect(counters.retries).toEqual([]);
-    clock.advance(7_999);
+    clock.advance(19_999);
     expect(counters.retries).toEqual([]);
     clock.advance(1);
     expect(counters.retries).toEqual([1]);
@@ -222,7 +238,7 @@ describe("SessionTimers", () => {
     timers.armGreetingWatchdog();
 
     settle(timers);
-    clock.advance(7_999);
+    clock.advance(19_999);
     expect(counters.retries).toEqual([]);
     clock.advance(1);
     expect(counters.retries).toEqual([1]);
@@ -232,7 +248,7 @@ describe("SessionTimers", () => {
     expect(counters.retries).toEqual([1]);
 
     settle(timers);
-    clock.advance(11_999);
+    clock.advance(24_999);
     expect(counters.retries).toEqual([1]);
     clock.advance(1);
     expect(counters.retries).toEqual([1, 2]);
@@ -241,7 +257,7 @@ describe("SessionTimers", () => {
     expect(counters.farewells).toBe(0);
 
     settle(timers);
-    clock.advance(11_999);
+    clock.advance(24_999);
     expect(counters.farewells).toBe(0);
     clock.advance(1);
     expect(counters.farewells).toBe(1);
@@ -259,11 +275,11 @@ describe("SessionTimers", () => {
     const { clock, counters, timers } = setup(LADDER_DURATIONS);
     timers.armGreetingWatchdog();
     settle(timers);
-    clock.advance(8_000);
+    clock.advance(20_000);
     settle(timers);
-    clock.advance(12_000);
+    clock.advance(25_000);
     settle(timers);
-    clock.advance(12_000);
+    clock.advance(25_000);
     expect(counters.farewells).toBe(1);
 
     timers.noteTutorTurnComplete();
@@ -284,7 +300,7 @@ describe("SessionTimers", () => {
     settle(timers);
 
     setTutorIdle(false);
-    clock.advance(8_000 + 5_000);
+    clock.advance(20_000 + 5_000);
     expect(counters.retries).toEqual([]);
 
     setTutorIdle(true);
@@ -296,7 +312,7 @@ describe("SessionTimers", () => {
     const { clock, counters, timers } = setup(LADDER_DURATIONS);
     timers.armGreetingWatchdog();
     settle(timers);
-    clock.advance(8_000);
+    clock.advance(20_000);
     expect(counters.retries).toEqual([1]);
 
     timers.disarmGreetingWatchdog();
@@ -324,11 +340,11 @@ describe("SessionTimers", () => {
     const { clock, counters, timers } = setup(LADDER_DURATIONS);
     timers.armGreetingWatchdog();
     settle(timers);
-    clock.advance(8_000);
+    clock.advance(20_000);
     settle(timers);
-    clock.advance(12_000);
+    clock.advance(25_000);
     settle(timers);
-    clock.advance(12_000);
+    clock.advance(25_000);
     expect(counters.farewells).toBe(1);
 
     timers.disarmGreetingWatchdog();
